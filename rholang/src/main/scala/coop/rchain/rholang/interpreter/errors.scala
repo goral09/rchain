@@ -1,6 +1,6 @@
 package coop.rchain.rholang.interpreter
 
-import cats.{Monad, MonadError}
+import cats.{Id, Monad, MonadError}
 import monix.eval.{Coeval, Task}
 import monix.eval.Task.catsAsync
 import cats.implicits._
@@ -100,6 +100,30 @@ object errors {
         }
 
       override def pure[A](x: A): Coeval[A] = Coeval.delay(x)
+    }
+
+  import cats.implicits._
+  implicit val monadErrorId: MonadError[Id, InterpreterError] =
+    new MonadError[Id, InterpreterError] {
+      override def pure[A](x: A): Id[A] = x
+
+      override def flatMap[A, B](fa: Id[A])(f: A => Id[B]): Id[B] = f(fa)
+
+      override def tailRecM[A, B](a: A)(f: A => Id[Either[A, B]]): Id[B] =
+        f(a) match {
+          case Left(la)  => tailRecM(la)(f)
+          case Right(rb) => rb
+        }
+
+      override def raiseError[A](e: InterpreterError): Id[A] = throw e
+
+      override def handleErrorWith[A](fa: Id[A])(f: InterpreterError => Id[A]): Id[A] =
+        try {
+          fa
+        } catch {
+          case ie: InterpreterError => f(ie)
+          case th: Throwable        => throw th
+        }
     }
 
 }
