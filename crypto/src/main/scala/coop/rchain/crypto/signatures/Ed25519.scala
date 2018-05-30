@@ -66,7 +66,6 @@ object Ed25519 {
         } else {
           throw ex
         }
-
     }
 
   /**
