@@ -2,11 +2,9 @@ package coop.rchain.rholang.interpreter
 
 import cats.effect.Sync
 import cats.implicits._
+import cats.mtl.FunctorTell
 import cats.{Applicative, FlatMap, Parallel, Eval => _}
-import cats.mtl.implicits._
-import cats.mtl.{FunctorTell, MonadState}
 import com.google.protobuf.ByteString
-import coop.rchain.catscontrib.Capture
 import coop.rchain.crypto.codec.Base16
 import coop.rchain.models.Channel.ChannelInstance
 import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
@@ -14,6 +12,7 @@ import coop.rchain.models.Expr.ExprInstance._
 import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
 import coop.rchain.models.Var.VarInstance
 import coop.rchain.models.Var.VarInstance.{BoundVar, FreeVar, Wildcard}
+import coop.rchain.models.rholang.implicits._
 import coop.rchain.models.serialization.implicits._
 import coop.rchain.models.{Match, MatchCase, GPrivate => _, _}
 import coop.rchain.rholang.interpreter.Substitute._
@@ -22,11 +21,10 @@ import coop.rchain.models.rholang.implicits._
 import coop.rchain.rholang.interpreter.storage.implicits._
 import coop.rchain.rspace.Serialize
 import coop.rchain.rspace.pure.PureRSpace
+import monix.eval.Coeval
 
 import scala.collection.immutable.BitSet
 import scala.util.Try
-import coop.rchain.models.rholang.sort.ordering._
-import monix.eval.Coeval
 
 // Notes: Caution, a type annotation is often needed for Env.
 
@@ -35,12 +33,6 @@ import monix.eval.Coeval
   * @tparam M The kind of Monad used for evaluation.
   */
 trait Reduce[M[_]] {
-
-  def produce(chan: Quote, data: Seq[Par], persistent: Boolean)(implicit env: Env[Par]): M[Unit]
-
-  def consume(binds: Seq[(BindPattern, Quote)], body: Par, persistent: Boolean)(
-      implicit env: Env[Par]): M[Unit]
-
   def eval(par: Par)(implicit env: Env[Par]): M[Unit]
 
   def inj(par: Par): M[Unit]
@@ -63,8 +55,9 @@ object Reduce {
                              Seq[Channel],
                              TaggedContinuation],
       dispatcher: => Dispatch[M, Seq[Channel], TaggedContinuation])(
-      implicit parallel: cats.Parallel[M, F],
-                                       s: Sync[M],
+      implicit
+      parallel: cats.Parallel[M, F],
+      s: Sync[M],
       fTell: FunctorTell[M, Throwable])
       extends Reduce[M] {
 
@@ -79,7 +72,7 @@ object Reduce {
       * @param env  An environment marking the execution context.
       * @return  An optional continuation resulting from a match in the tuplespace.
       */
-    override def produce(chan: Quote, data: Seq[Par], persistent: Boolean)(
+    private def produce(chan: Quote, data: Seq[Par], persistent: Boolean)(
         implicit env: Env[Par]): M[Unit] = {
       // TODO: Handle the environment in the store
       def go(res: Option[(TaggedContinuation, Seq[Seq[Channel]])]) =
@@ -114,7 +107,7 @@ object Reduce {
       * @return  An optional continuation resulting from a match. The body of the continuation
       *          will be @param body if the continuation is not None.
       */
-    override def consume(binds: Seq[(BindPattern, Quote)], body: Par, persistent: Boolean)(
+    private def consume(binds: Seq[(BindPattern, Quote)], body: Par, persistent: Boolean)(
         implicit env: Env[Par]): M[Unit] =
       binds match {
         case Nil => s.raiseError(ReduceError("Error: empty binds"))
@@ -171,7 +164,7 @@ object Reduce {
           expr.exprInstance match {
             case EVarBody(EVar(v)) =>
               (for {
-                varref <- eval(v.get)
+                varref <- eval(v)
                 _      <- eval(varref)
               } yield ()).handleError(fTell.tell)
             case e: EEvalBody =>
@@ -192,14 +185,6 @@ object Reduce {
     override def inj(par: Par): M[Unit] =
       for { _ <- eval(par)(Env[Par]()) } yield ()
 
-    def debug(msg: String): Unit = {
-      val now = java.time.format.DateTimeFormatter.ISO_INSTANT
-        .format(java.time.Instant.now)
-        .substring(11, 23)
-      val thread = Thread.currentThread.getName
-      println(s"$now [$thread]" + "\n" + msg)
-    }
-
     /** Algorithm as follows:
       *
       * 1. Fully evaluate the channel in given environment.
@@ -213,7 +198,7 @@ object Reduce {
       * @param env An execution context
       * @return
       */
-    def eval(send: Send)(implicit env: Env[Par]): M[Unit] =
+    private def eval(send: Send)(implicit env: Env[Par]): M[Unit] =
       for {
         quote <- eval(send.chan)
         data  <- send.data.toList.traverse(x => evalExpr(x))
@@ -222,10 +207,9 @@ object Reduce {
         unbundled <- subChan.value.singleBundle() match {
                       case Some(value) =>
                         if (!value.writeFlag) {
-                          s.raiseError(
-                            ReduceError("Trying to send on non-writeable channel."))
+                          s.raiseError(ReduceError("Trying to send on non-writeable channel."))
                         } else {
-                          s.pure(Quote(value.body.get))
+                          s.pure(Quote(value.body))
                         }
                       case None => Applicative[M].pure(subChan)
                     }
@@ -242,7 +226,7 @@ object Reduce {
                                         substituteChannel[M].substitute(pattern)(1, env))
                     } yield (BindPattern(substPatterns, rb.remainder, rb.freeCount), q))
         // TODO: Allow for the environment to be stored with the body in the Tuplespace
-        substBody <- substitutePar[M].substitute(receive.body.get)(0, env.shift(receive.bindCount))
+        substBody <- substitutePar[M].substitute(receive.body)(0, env.shift(receive.bindCount))
         _         <- consume(binds, substBody, receive.persistent)
       } yield ()
 
@@ -257,7 +241,7 @@ object Reduce {
       *                  an exception.
       *
       */
-    def eval(valproc: Var)(implicit env: Env[Par]): M[Par] =
+    private def eval(valproc: Var)(implicit env: Env[Par]): M[Par] =
       valproc.varInstance match {
         case BoundVar(level) =>
           env.get(level) match {
@@ -287,7 +271,7 @@ object Reduce {
       *            a binding for channel
       * @return A quoted process or "channel value"
       */
-    def eval(channel: Channel)(implicit env: Env[Par]): M[Quote] =
+    private def eval(channel: Channel)(implicit env: Env[Par]): M[Quote] =
       channel.channelInstance match {
         case Quote(p) =>
           for { evaled <- evalExpr(p) } yield Quote(evaled)
@@ -300,7 +284,7 @@ object Reduce {
           s.raiseError(ReduceError("Impossible channel instance EMPTY"))
       }
 
-    def eval(mat: Match)(implicit env: Env[Par]): M[Unit] = {
+    private def eval(mat: Match)(implicit env: Env[Par]): M[Unit] = {
       def addToEnv(env: Env[Par], freeMap: Map[Int, Par], freeCount: Int): Env[Par] =
         Range(0, freeCount).foldLeft(env)(
           (acc, e) =>
@@ -319,7 +303,7 @@ object Reduce {
           cases match {
             case Nil => Applicative[M].pure(Right(()))
             case singleCase +: caseRem =>
-              substitutePar[M].substitute(singleCase.pattern.get)(1, env).flatMap { pattern =>
+              substitutePar[M].substitute(singleCase.pattern)(1, env).flatMap { pattern =>
                 val matchResult =
                   SpatialMatcher
                     .spatialMatch(target, pattern)
@@ -328,7 +312,7 @@ object Reduce {
                   case None => Applicative[M].pure(Left((target, caseRem)))
                   case Some(freeMap) => {
                     val newEnv: Env[Par] = addToEnv(env, freeMap, singleCase.freeCount)
-                    eval(singleCase.source.get)(newEnv).map(Right(_))
+                    eval(singleCase.source)(newEnv).map(Right(_))
                   }
                 }
               }
@@ -338,7 +322,7 @@ object Reduce {
       }
 
       for {
-        evaledTarget <- evalExpr(mat.target.get)
+        evaledTarget <- evalExpr(mat.target)
         // TODO(kyle): Make the matcher accept an environment, instead of
         // substituting it.
         substTarget <- substitutePar[M].substitute(evaledTarget)(0, env)
@@ -353,19 +337,19 @@ object Reduce {
       * @param neu
       * @return
       */
-    def eval(neu: New)(implicit env: Env[Par]): M[Unit] = {
+    private def eval(neu: New)(implicit env: Env[Par]): M[Unit] = {
       def alloc(level: Int): Env[Par] =
         (env /: (0 until level).toList) { (_env, _) =>
           val addr: Par = GPrivate()
           _env.put(addr)
         }
 
-      eval(neu.p.get)(alloc(neu.bindCount))
+      eval(neu.p)(alloc(neu.bindCount))
     }
 
     private[this] def unbundleReceive(rb: ReceiveBind)(implicit env: Env[Par]): M[Quote] =
       for {
-        quote <- eval(rb.source.get)
+        quote <- eval(rb.source)
         subst <- substituteQuote[M].substitute(quote)(0, env)
         // Check if we try to read from bundled channel
         unbndl <- subst.quote.get.singleBundle() match {
@@ -373,32 +357,32 @@ object Reduce {
                      if (!value.readFlag) {
                        s.raiseError(ReduceError("Trying to read from non-readable channel."))
                      } else {
-                       s.pure(Quote(value.body.get))
+                       s.pure(Quote(value.body))
                      }
                    case None =>
                      s.pure(subst)
                  }
       } yield unbndl
 
-    def eval(bundle: Bundle)(implicit env: Env[Par]): M[Unit] =
-      eval(bundle.body.get)
+    private def eval(bundle: Bundle)(implicit env: Env[Par]): M[Unit] =
+      eval(bundle.body)
 
     def evalExprToPar(expr: Expr)(implicit env: Env[Par]): M[Par] =
       expr.exprInstance match {
         case EVarBody(EVar(v)) =>
           for {
-            p       <- eval(v.get)
+            p       <- eval(v)
             evaledP <- evalExpr(p)
           } yield evaledP
         case EMethodBody(EMethod(method, target, arguments, _, _)) => {
           val methodLookup = methodTable(method)
           for {
-            evaledTarget <- evalExpr(target.get)
+            evaledTarget <- evalExpr(target)
             evaledArgs   <- arguments.toList.traverse(expr => evalExpr(expr))
             resultPar <- methodLookup match {
                           case None =>
                             s.raiseError(ReduceError("Unimplemented method: " + method))
-                          case Some(f) => f(target.get, evaledArgs)(env)
+                          case Some(f) => f(target, evaledArgs)(env)
                         }
           } yield resultPar
         }
@@ -406,7 +390,7 @@ object Reduce {
         case _               => evalExprToExpr(expr).map(e => fromExpr(e)(identity))
       }
 
-    def evalExprToExpr(expr: Expr)(implicit env: Env[Par]): M[Expr] = {
+    private def evalExprToExpr(expr: Expr)(implicit env: Env[Par]): M[Expr] = {
       def relop(p1: Par,
                 p2: Par,
                 relopb: (Boolean, Boolean) => Boolean,
@@ -432,64 +416,64 @@ object Reduce {
         case x: GByteArray => Applicative[M].pure[Expr](x)
         case ENotBody(ENot(p)) =>
           for {
-            b <- evalToBool(p.get)
+            b <- evalToBool(p)
           } yield GBool(!b)
         case ENegBody(ENeg(p)) =>
           for {
-            v <- evalToInt(p.get)
+            v <- evalToInt(p)
           } yield GInt(-v)
         case EMultBody(EMult(p1, p2)) =>
           for {
-            v1 <- evalToInt(p1.get)
-            v2 <- evalToInt(p2.get)
+            v1 <- evalToInt(p1)
+            v2 <- evalToInt(p2)
           } yield GInt(v1 * v2)
         case EDivBody(EDiv(p1, p2)) =>
           for {
-            v1 <- evalToInt(p1.get)
-            v2 <- evalToInt(p2.get)
+            v1 <- evalToInt(p1)
+            v2 <- evalToInt(p2)
           } yield GInt(v1 / v2)
         case EPlusBody(EPlus(p1, p2)) =>
           for {
-            v1 <- evalToInt(p1.get)
-            v2 <- evalToInt(p2.get)
+            v1 <- evalToInt(p1)
+            v2 <- evalToInt(p2)
           } yield GInt(v1 + v2)
         case EMinusBody(EMinus(p1, p2)) =>
           for {
-            v1 <- evalToInt(p1.get)
-            v2 <- evalToInt(p2.get)
+            v1 <- evalToInt(p1)
+            v2 <- evalToInt(p2)
           } yield GInt(v1 - v2)
-        case ELtBody(ELt(p1, p2))   => relop(p1.get, p2.get, (_ < _), (_ < _), (_ < _))
-        case ELteBody(ELte(p1, p2)) => relop(p1.get, p2.get, (_ <= _), (_ <= _), (_ <= _))
-        case EGtBody(EGt(p1, p2))   => relop(p1.get, p2.get, (_ > _), (_ > _), (_ > _))
-        case EGteBody(EGte(p1, p2)) => relop(p1.get, p2.get, (_ >= _), (_ >= _), (_ >= _))
+        case ELtBody(ELt(p1, p2))   => relop(p1, p2, (_ < _), (_ < _), (_ < _))
+        case ELteBody(ELte(p1, p2)) => relop(p1, p2, (_ <= _), (_ <= _), (_ <= _))
+        case EGtBody(EGt(p1, p2))   => relop(p1, p2, (_ > _), (_ > _), (_ > _))
+        case EGteBody(EGte(p1, p2)) => relop(p1, p2, (_ >= _), (_ >= _), (_ >= _))
         case EEqBody(EEq(p1, p2)) =>
           for {
-            v1 <- evalExpr(p1.get)
-            v2 <- evalExpr(p2.get)
+            v1 <- evalExpr(p1)
+            v2 <- evalExpr(p2)
             // TODO: build an equality operator that takes in an environment.
             sv1 <- substitutePar[M].substitute(v1)(0, env)
             sv2 <- substitutePar[M].substitute(v2)(0, env)
           } yield GBool(sv1 == sv2)
         case ENeqBody(ENeq(p1, p2)) =>
           for {
-            v1  <- evalExpr(p1.get)
-            v2  <- evalExpr(p2.get)
+            v1  <- evalExpr(p1)
+            v2  <- evalExpr(p2)
             sv1 <- substitutePar[M].substitute(v1)(0, env)
             sv2 <- substitutePar[M].substitute(v2)(0, env)
           } yield GBool(sv1 != sv2)
         case EAndBody(EAnd(p1, p2)) =>
           for {
-            b1 <- evalToBool(p1.get)
-            b2 <- evalToBool(p2.get)
+            b1 <- evalToBool(p1)
+            b2 <- evalToBool(p2)
           } yield GBool(b1 && b2)
         case EOrBody(EOr(p1, p2)) =>
           for {
-            b1 <- evalToBool(p1.get)
-            b2 <- evalToBool(p2.get)
+            b1 <- evalToBool(p1)
+            b2 <- evalToBool(p2)
           } yield GBool(b1 || b2)
         case EVarBody(EVar(v)) =>
           for {
-            p       <- eval(v.get)
+            p       <- eval(v)
             exprVal <- evalSingleExpr(p)
           } yield exprVal
         case EListBody(el) => {
@@ -524,12 +508,12 @@ object Reduce {
         case EMethodBody(EMethod(method, target, arguments, _, _)) => {
           val methodLookup = methodTable(method)
           for {
-            evaledTarget <- evalExpr(target.get)
+            evaledTarget <- evalExpr(target)
             evaledArgs   <- arguments.toList.traverse(expr => evalExpr(expr))
             resultPar <- methodLookup match {
                           case None =>
                             s.raiseError(ReduceError("Unimplemented method: " + method))
-                          case Some(f) => f(target.get, evaledArgs)(env)
+                          case Some(f) => f(target, evaledArgs)(env)
                         }
             resultExpr <- evalSingleExpr(resultPar)
           } yield resultExpr
@@ -609,8 +593,7 @@ object Reduce {
               Try(Expr(GByteArray(ByteString.copyFrom(Base16.decode(encoded)))))
                 .fold(th => s.raiseError[Par](decodingError(th)), x => s.pure[Par](x))
             case _ =>
-              s.raiseError(
-                ReduceError("Error: hexToBytes can be called only on single strings."))
+              s.raiseError(ReduceError("Error: hexToBytes can be called only on single strings."))
           }
         }
       }
@@ -619,8 +602,7 @@ object Reduce {
     private[this] def method(methodName: String, expectedArgsLength: Int, args: Seq[Par])(
         thunk: => M[Par]): M[Par] =
       if (args.length != expectedArgsLength) {
-        s.raiseError(
-          ReduceError(s"Error: $methodName expects $expectedArgsLength Par argument(s)"))
+        s.raiseError(ReduceError(s"Error: $methodName expects $expectedArgsLength Par argument(s)"))
       } else {
         thunk
       }
@@ -700,8 +682,7 @@ object Reduce {
                        base.locallyFree.map(b => b | par.locallyFree))))
 
           case _ =>
-            s.raiseError(
-              ReduceError("Error: add can be called only with one Par as argument."))
+            s.raiseError(ReduceError("Error: add can be called only with one Par as argument."))
         }
 
       method("add", 1, args) {
@@ -804,7 +785,7 @@ object Reduce {
             s.raiseError(ReduceError("Error: Multiple expressions given."))
         }
 
-    def evalToInt(p: Par)(implicit env: Env[Par]): M[Int] =
+    private def evalToInt(p: Par)(implicit env: Env[Par]): M[Int] =
       if (!p.sends.isEmpty || !p.receives.isEmpty || !p.news.isEmpty || !p.matches.isEmpty || !p.ids.isEmpty)
         s.raiseError(
           ReduceError("Error: parallel or non expression found where expression expected."))
@@ -813,7 +794,7 @@ object Reduce {
           case Expr(GInt(v)) +: Nil => Applicative[M].pure(v)
           case Expr(EVarBody(EVar(v))) +: Nil =>
             for {
-              p      <- eval(v.get)
+              p      <- eval(v)
               intVal <- evalToInt(p)
             } yield intVal
           case (e: Expr) +: Nil =>
@@ -839,7 +820,7 @@ object Reduce {
           case Expr(GBool(b)) +: Nil => Applicative[M].pure(b)
           case Expr(EVarBody(EVar(v))) +: Nil =>
             for {
-              p       <- eval(v.get)
+              p       <- eval(v)
               boolVal <- evalToBool(p)
             } yield boolVal
           case (e: Expr) +: Nil =>
@@ -856,7 +837,7 @@ object Reduce {
             s.raiseError(ReduceError("Error: Multiple expressions given."))
         }
 
-    def updateLocallyFree(par: Par): Par = {
+    private def updateLocallyFree(par: Par): Par = {
       val resultLocallyFree =
         par.sends.foldLeft(BitSet())((acc, send) => acc | send.locallyFree) |
           par.receives.foldLeft(BitSet())((acc, receive) => acc | receive.locallyFree) |
@@ -866,12 +847,12 @@ object Reduce {
       par.copy(locallyFree = resultLocallyFree)
     }
 
-    def updateLocallyFree(elist: EList): EList = {
+    private def updateLocallyFree(elist: EList): EList = {
       val resultLocallyFree = elist.ps.foldLeft(BitSet())((acc, p) => acc | p.locallyFree)
       elist.copy(locallyFree = resultLocallyFree)
     }
 
-    def updateLocallyFree(elist: ETuple): ETuple = {
+    private def updateLocallyFree(elist: ETuple): ETuple = {
       val resultLocallyFree = elist.ps.foldLeft(BitSet())((acc, p) => acc | p.locallyFree)
       elist.copy(locallyFree = resultLocallyFree)
     }
