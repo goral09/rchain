@@ -6,6 +6,7 @@ import cats.Functor
 import cats.effect.Sync
 import cats.implicits._
 import cats.mtl.FunctorTell
+import cats.mtl.FunctorTell.FunctorTellTemplate
 import coop.rchain.catscontrib.Capture
 import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
 import coop.rchain.models.Expr.ExprInstance.GString
@@ -30,7 +31,7 @@ class Runtime private (
                                   Seq[Channel],
                                   Seq[Channel],
                                   TaggedContinuation],
-    var errorLog: Runtime.ErrorLog) {
+    var errorLog: ErrorLog) {
   def readAndClearErrorVector(): Vector[Throwable] = errorLog.readAndClearErrorVector()
   def close(): Unit                                = space.close()
 }
@@ -57,40 +58,6 @@ object Runtime {
           TaggedContinuation(ScalaBodyRef(ref))
         )
     }
-
-  class ErrorLog extends FunctorTell[Task, Throwable] {
-    private var errorVector: Vector[Throwable] = Vector.empty
-    val functor                                = implicitly[Functor[Task]]
-    override def tell(e: Throwable): Task[Unit] =
-      Task.now {
-        this.synchronized {
-          errorVector = errorVector :+ e
-        }
-      }
-
-    override def writer[A](a: A, e: Throwable): Task[A] =
-      Task.now {
-        this.synchronized {
-          errorVector = errorVector :+ e
-        }
-        a
-      }
-
-    override def tuple[A](ta: (Throwable, A)): Task[A] =
-      Task.now {
-        this.synchronized {
-          errorVector = errorVector :+ ta._1
-        }
-        ta._2
-      }
-
-    def readAndClearErrorVector(): Vector[Throwable] =
-      this.synchronized {
-        val ret = errorVector
-        errorVector = Vector.empty
-        ret
-      }
-  }
 
   def create(dataDir: Path, mapSize: Long): Runtime = {
 

@@ -48,7 +48,7 @@ trait PersistentStoreTester {
 
 class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   "evalExpr" should "handle simple addition" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val reducer      = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val addExpr      = EPlus(GInt(7), GInt(8))
@@ -63,7 +63,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "evalExpr" should "leave ground values alone" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val reducer      = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val groundExpr   = GInt(7)
@@ -78,7 +78,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "evalExpr" should "handle equality between arbitary processes" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val reducer      = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val eqExpr       = EEq(GPrivate("private_name"), GPrivate("private_name"))
@@ -92,7 +92,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "evalExpr" should "substitute before comparison." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val reducer           = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       implicit val emptyEnv = Env.makeEnv(Par(), Par())
@@ -106,7 +106,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Bundle" should "evaluate contents of bundle" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val reducer = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val bundleSend =
@@ -137,7 +137,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   it should "throw an error if names are used against their polarity" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     /* for (n <- @bundle+ { y } ) { }  -> for (n <- y) { }
      */
     val y = GString("y")
@@ -173,7 +173,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Send" should "place something in the tuplespace." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val reducer = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val send =
@@ -204,7 +204,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   it should "verify that Bundle is writeable before sending on Bundle " in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     /* @bundle+ { x } !(7) -> x!(7)
      */
     val x = GString("channel")
@@ -227,7 +227,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of single channel Receive" should "place something in the tuplespace." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val receive =
         Receive(Seq(
@@ -273,7 +273,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   it should "verify that bundle is readable if receiving on Bundle" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     /* for (@Nil <- @bundle- { y } ) { }  -> for (n <- y) { }
      */
 
@@ -311,7 +311,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Send | Receive" should "meet in the tuplespace and proceed." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val send =
       Send(Quote(GString("channel")), List(GInt(7), GInt(8), GInt(9)), false, BitSet())
     val receive = Receive(
@@ -365,7 +365,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
 
   "eval of Send | Receive" should "when whole list is bound to list remainder, meet in the tuplespace and proceed. (RHOL-422)" in {
     // for(@[...a] <- @"channel") { … } | @"channel"!([7,8,9])
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     // format: off
     val send =
       Send(Quote(GString("channel")), List(Par(exprs = Seq(Expr(EListBody(EList(Seq(GInt(7), GInt(8), GInt(9)))))))), false, BitSet())
@@ -420,7 +420,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Send on (7 + 8) | Receive on 15" should "meet in the tuplespace and proceed." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val send =
       Send(Quote(EPlus(GInt(7), GInt(8))), List(GInt(7), GInt(8), GInt(9)), false, BitSet())
     val receive = Receive(
@@ -473,7 +473,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Send of Receive | Receive" should "meet in the tuplespace and proceed." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val simpleReceive = Receive(
       Seq(ReceiveBind(Seq(Quote(GInt(2))), Quote(GInt(2)))),
       Par(),
@@ -548,7 +548,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "Simple match" should "capture and add to the environment." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val result = withTestSpace { space =>
       val pattern = Send(ChanVar(FreeVar(0)), List(GInt(7), EVar(FreeVar(1))), false, BitSet())
         .withConnectiveUsed(true)
@@ -594,7 +594,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Send | Send | Receive join" should "meet in the tuplespace and proceed." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val send1 =
       Send(Quote(GString("channel1")), List(GInt(7), GInt(8), GInt(9)), false, BitSet())
     val send2 =
@@ -672,7 +672,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of Send with remainder receive" should "capture the remainder." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val send =
       Send(Quote(GString("channel")), List(GInt(7), GInt(8), GInt(9)), false, BitSet())
     val receive =
@@ -705,7 +705,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of nth method" should "pick out the nth item from a list" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val nthCall: Expr =
       EMethod("nth", EList(List(GInt(7), GInt(8), GInt(9), GInt(10))), List[Par](GInt(2)))
     val directResult: Par = withTestSpace { space =>
@@ -747,7 +747,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of nth method in send position" should "change what is sent" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val nthCallEvalToSend: Expr =
       EMethod("nth",
               EList(
@@ -787,7 +787,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "eval of `toByteArray` method on any process" should "return that process serialized" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     import coop.rchain.models.serialization.implicits._
     val proc = Receive(Seq(ReceiveBind(Seq(ChanVar(FreeVar(0))), Quote(GString("channel")))),
                        Par(),
@@ -822,7 +822,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   it should "return an error when `toByteArray` is called with arguments" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val toByteArrayWithArgumentsCall: EMethod =
       EMethod(
         "toByteArray",
@@ -845,7 +845,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
 
   "eval of hexToBytes" should "transform encoded string to byte array (not the rholang term)" in {
     import coop.rchain.models.serialization.implicits._
-    implicit val errorLog         = new Runtime.ErrorLog()
+    implicit val errorLog         = new ErrorLog()
     val testString                = "testing testing"
     val base16Repr                = Base16.encode(testString.getBytes)
     val proc: Par                 = GString(base16Repr)
@@ -877,7 +877,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   "variable references" should "be substituted before being used." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
 
     val proc = New(
       bindCount = 1,
@@ -899,7 +899,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
     )
 
     val result = withTestSpace { space =>
-      implicit val errorLog = new Runtime.ErrorLog()
+      implicit val errorLog = new ErrorLog()
       val reducer           = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val env               = Env[Par]()
       val task              = reducer.eval(proc)(env)
@@ -921,7 +921,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   it should "be substituted before being used in a match." in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
 
     val proc = New(
       bindCount = 1,
@@ -934,7 +934,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
     )
 
     val result = withTestSpace { space =>
-      implicit val errorLog = new Runtime.ErrorLog()
+      implicit val errorLog = new ErrorLog()
       val reducer           = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val env               = Env[Par]()
       val task              = reducer.eval(proc)(env)
@@ -956,7 +956,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
   }
 
   it should "reference a variable that comes from a match in tuplespace" in {
-    implicit val errorLog = new Runtime.ErrorLog()
+    implicit val errorLog = new ErrorLog()
     val proc = Par(
       sends = List(Send(chan = Quote(GInt(7)), data = List(GInt(10)))),
       receives = List(
@@ -980,7 +980,7 @@ class ReduceSpec extends FlatSpec with Matchers with PersistentStoreTester {
     )
 
     val result = withTestSpace { space =>
-      implicit val errorLog = new Runtime.ErrorLog()
+      implicit val errorLog = new ErrorLog()
       val reducer           = RholangOnlyDispatcher.create[Task, Task.Par](space).reducer
       val env               = Env[Par]()
       val task              = reducer.eval(proc)(env)
