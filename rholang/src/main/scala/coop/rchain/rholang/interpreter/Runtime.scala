@@ -2,22 +2,18 @@ package coop.rchain.rholang.interpreter
 
 import java.nio.file.{Files, Path}
 
-import cats.Functor
-import cats.effect.Sync
-import cats.implicits._
-import cats.mtl.FunctorTell
-import cats.mtl.FunctorTell.FunctorTellTemplate
-import coop.rchain.catscontrib.Capture
+import cats.mtl.{FunctorTell, MonadState}
 import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
 import coop.rchain.models.Expr.ExprInstance.GString
 import coop.rchain.models.TaggedContinuation.TaggedCont.ScalaBodyRef
 import coop.rchain.models.Var.VarInstance.FreeVar
-import coop.rchain.models.{BindPattern, Channel, TaggedContinuation, Var}
 import coop.rchain.models.rholang.implicits._
-import coop.rchain.rholang.interpreter.errors.InterpreterError
+import coop.rchain.models.{BindPattern, Channel, TaggedContinuation, Var}
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 import coop.rchain.rholang.interpreter.storage.implicits._
-import coop.rchain.rspace.history.Branch
 import coop.rchain.rspace._
+import coop.rchain.rspace.history.Branch
+import coop.rchain.shared.MonadStateAr
 import monix.eval.Task
 
 import scala.collection.immutable
@@ -31,8 +27,10 @@ class Runtime private (
                                   Seq[Channel],
                                   Seq[Channel],
                                   TaggedContinuation],
+    val costAccounting: MonadState[Task, CostAccount],
     var errorLog: ErrorLog) {
   def readAndClearErrorVector(): Vector[Throwable] = errorLog.readAndClearErrorVector()
+  def getCost(): Task[CostAccount]                 = costAccounting.get
   def close(): Unit                                = space.close()
 }
 
@@ -79,6 +77,8 @@ object Runtime {
 
     val errorLog                                  = new ErrorLog()
     implicit val ft: FunctorTell[Task, Throwable] = errorLog
+    implicit val costAccounting: MonadState[Task, CostAccount] =
+      MonadStateAr.of[Task, CostAccount](CostAccount.zero)
 
     lazy val dispatcher: Dispatch[Task, Seq[Channel], TaggedContinuation] =
       RholangAndScalaDispatcher
@@ -117,6 +117,11 @@ object Runtime {
 
     assert(res.forall(_.isEmpty))
 
-    new Runtime(dispatcher.reducer, replayDispatcher.reducer, space, replaySpace, errorLog)
+    new Runtime(dispatcher.reducer,
+                replayDispatcher.reducer,
+                space,
+                replaySpace,
+                costAccounting,
+                errorLog)
   }
 }

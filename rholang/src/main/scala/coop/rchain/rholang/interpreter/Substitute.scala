@@ -2,6 +2,7 @@ package coop.rchain.rholang.interpreter
 
 import cats.effect.Sync
 import cats.implicits._
+import cats.mtl.MonadState
 import cats.{Applicative, Monad}
 import coop.rchain.models.Channel.ChannelInstance
 import coop.rchain.models.Channel.ChannelInstance._
@@ -17,8 +18,11 @@ import errors._
 import coop.rchain.models.rholang.sort.ordering._
 
 trait Substitute[M[_], A] {
-  def substitute(term: A)(implicit depth: Int, env: Env[Par]): M[A]
-  def substituteNoSort(term: A)(implicit depth: Int, env: Env[Par]): M[A]
+  def substitute(term: A)(implicit depth: Int,
+                          env: Env[Par] /*, costAccounting: MonadState[M, CostAccount]*/ ): M[A]
+  def substituteNoSort(term: A)(
+      implicit depth: Int,
+      env: Env[Par] /*, costAccounting: MonadState[M, CostAccount*/ ): M[A]
 }
 
 object Substitute {

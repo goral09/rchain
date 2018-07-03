@@ -1,12 +1,13 @@
 package coop.rchain.rholang.interpreter
 
-import cats.{effect, ApplicativeError, Parallel}
+import cats.{ApplicativeError, Monad, Parallel, effect}
 import cats.effect.Sync
-import cats.mtl.FunctorTell
+import cats.mtl.{FunctorTell, MonadState}
 import coop.rchain.catscontrib.Capture
 import coop.rchain.models.Channel.ChannelInstance.Quote
 import coop.rchain.models.TaggedContinuation.TaggedCont.{Empty, ParBody, ScalaBodyRef}
 import coop.rchain.models.{BindPattern, Channel, Par, TaggedContinuation}
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 import coop.rchain.rholang.interpreter.errors.{InterpreterError, InterpreterErrorsM}
 import coop.rchain.rspace.ISpace
 import coop.rchain.rspace.pure.PureRSpace
@@ -52,6 +53,7 @@ object RholangOnlyDispatcher {
       implicit
       parallel: Parallel[M, F],
       s: Sync[M],
+      costAccounting: MonadState[M, CostAccount],
       ft: FunctorTell[M, Throwable]): Dispatch[M, Seq[Channel], TaggedContinuation] = {
     val pureSpace
       : PureRSpace[M, Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation] =
@@ -94,6 +96,7 @@ object RholangAndScalaDispatcher {
       implicit
       parallel: Parallel[M, F],
       s: Sync[M],
+      costAccounting: MonadState[M, CostAccount],
       ft: FunctorTell[M, Throwable]): Dispatch[M, Seq[Channel], TaggedContinuation] = {
     val pureSpace
       : PureRSpace[M, Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation] =
