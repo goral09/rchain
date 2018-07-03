@@ -9,7 +9,7 @@ import cats.implicits._
 
 import scala.annotation.tailrec
 
-final class MonadStateAr[F[_], S] private (private val ar: AtomicReference[S])(implicit F: Sync[F])
+final class AtomicRefMonadState[F[_], S] private(private val ar: AtomicReference[S])(implicit F: Sync[F])
     extends MonadState[F, S] {
 
   override def set(s: S): F[Unit] = F.delay(ar.set(s))
@@ -32,7 +32,7 @@ final class MonadStateAr[F[_], S] private (private val ar: AtomicReference[S])(i
   }
 }
 
-object MonadStateAr {
-  def of[F[_]: Sync, S](init: S): MonadStateAr[F, S] =
-    new MonadStateAr[F, S](new AtomicReference[S](init))
+object AtomicRefMonadState {
+  def of[F[_]: Sync, S](init: S): AtomicRefMonadState[F, S] =
+    new AtomicRefMonadState[F, S](new AtomicReference[S](init))
 }
