@@ -78,16 +78,16 @@ object Runtime {
     val errorLog                                  = new ErrorLog()
     implicit val ft: FunctorTell[Task, Throwable] = errorLog
     val costState                                 = AtomicRefMonadState.of[Task, CostAccount](CostAccount.zero)
-    implicit val costAccounting: CostAccountingAlg[Task] =
+    val costAccounting: CostAccountingAlg[Task] =
       CostAccountingAlg.monadState(costState)
 
     lazy val dispatcher: Dispatch[Task, Seq[Channel], TaggedContinuation] =
       RholangAndScalaDispatcher
-        .create(space, dispatchTable)
+        .create(space, dispatchTable, costAccounting)
 
     lazy val replayDispatcher: Dispatch[Task, Seq[Channel], TaggedContinuation] =
       RholangAndScalaDispatcher
-        .create(replaySpace, dispatchTable)
+        .create(replaySpace, dispatchTable, costAccounting)
 
     lazy val dispatchTable: Map[Ref, Seq[Seq[Channel]] => Task[Unit]] = Map(
       0L -> SystemProcesses.stdout,

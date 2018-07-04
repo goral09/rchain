@@ -48,11 +48,11 @@ class RholangOnlyDispatcher[M[_]] private (_reducer: => Reduce[M])(implicit s: S
 object RholangOnlyDispatcher {
 
   def create[M[_], F[_]](
-      tuplespace: ISpace[Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation])(
+      tuplespace: ISpace[Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation],
+      costAccountingAlg: CostAccountingAlg[M])(
       implicit
       parallel: Parallel[M, F],
       s: Sync[M],
-      costAccountingAlg: CostAccountingAlg[M],
       ft: FunctorTell[M, Throwable]): Dispatch[M, Seq[Channel], TaggedContinuation] = {
     val pureSpace
       : PureRSpace[M, Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation] =
@@ -61,7 +61,7 @@ object RholangOnlyDispatcher {
     lazy val dispatcher: Dispatch[M, Seq[Channel], TaggedContinuation] =
       new RholangOnlyDispatcher(reducer)
     lazy val reducer: Reduce[M] =
-      new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg)
+      new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg, costAccountingAlg)
     dispatcher
   }
 }
@@ -92,11 +92,11 @@ object RholangAndScalaDispatcher {
 
   def create[M[_], F[_]](
       tuplespace: ISpace[Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation],
-      dispatchTable: => Map[Long, Function1[Seq[Seq[Channel]], M[Unit]]])(
+      dispatchTable: => Map[Long, Function1[Seq[Seq[Channel]], M[Unit]]],
+      costAccountingAlg: CostAccountingAlg[M])(
       implicit
       parallel: Parallel[M, F],
       s: Sync[M],
-      costAccountingAlg: CostAccountingAlg[M],
       ft: FunctorTell[M, Throwable]): Dispatch[M, Seq[Channel], TaggedContinuation] = {
     val pureSpace
       : PureRSpace[M, Channel, BindPattern, Seq[Channel], Seq[Channel], TaggedContinuation] =
@@ -105,7 +105,7 @@ object RholangAndScalaDispatcher {
     lazy val dispatcher: Dispatch[M, Seq[Channel], TaggedContinuation] =
       new RholangAndScalaDispatcher(reducer, dispatchTable)
     lazy val reducer: Reduce[M] =
-      new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg)
+      new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg, costAccountingAlg)
     dispatcher
   }
 }

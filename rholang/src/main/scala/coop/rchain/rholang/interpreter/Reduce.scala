@@ -49,11 +49,11 @@ trait Reduce[M[_]] {
 
 object Reduce {
 
-  class DebruijnInterpreter[M[_], F[_]](tuplespaceAlg: TuplespaceAlg[M])(
+  class DebruijnInterpreter[M[_], F[_]](tuplespaceAlg: TuplespaceAlg[M],
+                                        costAccountingAlg: CostAccountingAlg[M])(
       implicit
       parallel: cats.Parallel[M, F],
       s: Sync[M],
-      costAccountingAlg: CostAccountingAlg[M],
       fTell: FunctorTell[M, Throwable])
       extends Reduce[M] {
 
