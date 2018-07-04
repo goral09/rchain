@@ -9,9 +9,14 @@ import coop.rchain.models.rholang.implicits.VectorPar
 import coop.rchain.models.rholang.sort.ParSortMatcher
 import coop.rchain.rholang.interpreter.accounting.CostAccount
 import monix.eval.{Coeval, Task}
-import coop.rchain.rholang.interpreter.errors.{InterpreterError, SyntaxError, UnrecognizedInterpreterError, UnrecognizedNormalizerError}
+import coop.rchain.rholang.interpreter.errors.{
+  InterpreterError,
+  SyntaxError,
+  UnrecognizedInterpreterError,
+  UnrecognizedNormalizerError
+}
 import coop.rchain.rholang.syntax.rholang_mercury.Absyn.Proc
-import coop.rchain.rholang.syntax.rholang_mercury.{Yylex, parser}
+import coop.rchain.rholang.syntax.rholang_mercury.{parser, Yylex}
 
 private class FailingTask[T](task: Task[Either[Throwable, T]]) {
   def raiseOnLeft =

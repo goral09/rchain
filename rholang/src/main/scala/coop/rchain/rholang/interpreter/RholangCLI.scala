@@ -12,7 +12,7 @@ import coop.rchain.rholang.interpreter.storage.StoragePrinter
 import coop.rchain.rspace.IStore
 import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
-import org.rogach.scallop.{ScallopConf, stringListConverter}
+import org.rogach.scallop.{stringListConverter, ScallopConf}
 
 import scala.annotation.tailrec
 import scala.concurrent.Await

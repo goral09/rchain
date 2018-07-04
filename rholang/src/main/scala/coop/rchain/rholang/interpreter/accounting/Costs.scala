@@ -12,7 +12,7 @@ trait Costs {
 
   def stringCost(str: String): Cost               = str.getBytes().size
   def byteArrayCost(byteString: ByteString): Cost = BigInt(byteString.size())
-  def collectionCost(l: List[_]): Cost                  = BigInt(l.size)
+  def collectionCost(l: List[_]): Cost            = BigInt(l.size)
 
   final val SUM_COST: Cost            = 3
   final val SUBTRACTION_COST: Cost    = 3
