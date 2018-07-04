@@ -3,7 +3,7 @@ package coop.rchain.rholang.interpreter
 import cats.effect.Sync
 import cats.implicits._
 import cats.mtl.{FunctorTell, MonadState}
-import cats.{Applicative, FlatMap, Parallel, Eval => _}
+import cats.{Applicative, FlatMap, MonadError, Parallel, Eval => _}
 import com.google.protobuf.ByteString
 import coop.rchain.crypto.codec.Base16
 import coop.rchain.models.Channel.ChannelInstance
@@ -26,6 +26,7 @@ import monix.eval.Coeval
 import scala.collection.immutable.BitSet
 import scala.util.Try
 import accounting._
+import coop.rchain.rholang.interpreter.storage.TuplespaceAlg
 
 // Notes: Caution, a type annotation is often needed for Env.
 
@@ -48,18 +49,11 @@ trait Reduce[M[_]] {
 
 object Reduce {
 
-  class DebruijnInterpreter[M[_], F[_]](
-      tupleSpace: PureRSpace[M,
-                             Channel,
-                             BindPattern,
-                             Seq[Channel],
-                             Seq[Channel],
-                             TaggedContinuation],
-      dispatcher: => Dispatch[M, Seq[Channel], TaggedContinuation])(
+  class DebruijnInterpreter[M[_], F[_]](tuplespaceAlg: TuplespaceAlg[M])(
       implicit
       parallel: cats.Parallel[M, F],
       s: Sync[M],
-      costAccounting: MonadState[M, CostAccount],
+      costAccountingAlg: CostAccountingAlg[M],
       fTell: FunctorTell[M, Throwable])
       extends Reduce[M] {
 
@@ -72,31 +66,11 @@ object Reduce {
       * @param env  An environment marking the execution context.
       * @return  An optional continuation resulting from a match in the tuplespace.
       */
-    private def produce(chan: Quote, data: Seq[Par], persistent: Boolean)(
-        implicit env: Env[Par]): M[Unit] = {
-      // TODO: Handle the environment in the store
-      def go(res: Option[(TaggedContinuation, Seq[Seq[Channel]])]) =
-        res match {
-          case Some((continuation, dataList)) =>
-            if (persistent) {
-              Parallel.parSequence_[List, M, F, Unit](
-                List(dispatcher.dispatch(continuation, dataList), produce(chan, data, persistent)))
-            } else {
-              dispatcher.dispatch(continuation, dataList)
-            }
-          case None =>
-            s.unit
-        }
-
+    private def produce(chan: Quote, data: Seq[Channel], persistent: Boolean): M[Unit] =
       for {
-        substData <- data.toList.traverse(
-                      substitutePar[M].substitute(_)(0, env).map(p => Channel(Quote(p))))
-        rspaceCost = Channel(chan).storageCost + substData.storageCost //TODO: what if it's persistent?
-        _          <- costAccounting.modify(_ + rspaceCost)
-        res        <- tupleSpace.produce(Channel(chan), substData, persist = persistent)
-        _          <- go(res)
+        _ <- costAccountingAlg.charge(Channel(chan).storageCost + data.storageCost)
+        _ <- tuplespaceAlg.produce(Channel(chan), data, persistent)
       } yield ()
-    }
 
     /**
       * Materialize a send in the store, optionally returning the matched continuation.
@@ -109,32 +83,17 @@ object Reduce {
       * @return  An optional continuation resulting from a match. The body of the continuation
       *          will be @param body if the continuation is not None.
       */
-    private def consume(binds: Seq[(BindPattern, Quote)], body: Par, persistent: Boolean)(
-        implicit env: Env[Par]): M[Unit] =
-      binds match {
-        case Nil => s.raiseError(ReduceError("Error: empty binds"))
-        case _ =>
-          val (patterns: Seq[BindPattern], sources: Seq[Quote]) = binds.unzip
-          val srcs                                              = sources.map(q => Channel(q)).toList
-          val taggedBody                                        = TaggedContinuation(ParBody(body))
-          val rspaceCost                                        = body.storageCost + patterns.storageCost + srcs.storageCost
-          for {
-            _ <- costAccounting.modify(_ + rspaceCost)
-            o <- tupleSpace.consume(srcs, patterns.toList, taggedBody, persist = persistent)
-            _ <- o match {
-                  case Some((continuation, dataList)) =>
-                    dispatcher.dispatch(continuation, dataList)
-                    if (persistent) {
-                      List(dispatcher.dispatch(continuation, dataList),
-                           consume(binds, body, persistent)).parSequence
-                        .as(())
-                    } else {
-                      dispatcher.dispatch(continuation, dataList)
-                    }
-                  case None => Applicative[M].pure(())
-                }
-          } yield ()
-      }
+    private def consume(binds: Seq[(BindPattern, Quote)],
+                        body: Par,
+                        persistent: Boolean): M[Unit] = {
+      val (patterns: Seq[BindPattern], sources: Seq[Quote]) = binds.unzip
+      val srcs                                              = sources.map(q => Channel(q)).toList
+      val rspaceCost                                        = body.storageCost + patterns.storageCost + srcs.storageCost
+      for {
+        _ <- costAccountingAlg.charge(rspaceCost)
+        _ <- tuplespaceAlg.consume(binds, body, persistent)
+      } yield ()
+    }
 
     /** WanderUnordered is the non-deterministic analogue
       * of traverse - it parallelizes eval.
@@ -188,7 +147,7 @@ object Reduce {
 
     override def inj(par: Par): M[Unit] =
       for {
-        _ <- costAccounting.set(CostAccount.zero)
+        _ <- costAccountingAlg.set(CostAccount.zero)
         _ <- eval(par)(Env[Par]())
       } yield ()
 
@@ -220,8 +179,10 @@ object Reduce {
                         }
                       case None => Applicative[M].pure(subChan)
                     }
-        _ <- produce(unbundled, data, send.persistent)
-        _ <- costAccounting.modify(_ + SEND_EVAL_COST)
+        substData <- data.traverse(
+                      substitutePar[M].substitute(_)(0, env).map(p => Channel(Quote(p))))
+        _ <- produce(unbundled, substData, send.persistent)
+        _ <- costAccountingAlg.charge(SEND_EVAL_COST)
       } yield ()
 
     def eval(receive: Receive)(implicit env: Env[Par]): M[Unit] =
@@ -236,7 +197,7 @@ object Reduce {
         // TODO: Allow for the environment to be stored with the body in the Tuplespace
         substBody <- substitutePar[M].substitute(receive.body)(0, env.shift(receive.bindCount))
         _         <- consume(binds, substBody, receive.persistent)
-        _         <- costAccounting.modify(_ + RECEIVE_EVAL_COST)
+        _         <- costAccountingAlg.charge(RECEIVE_EVAL_COST)
       } yield ()
 
     /**
@@ -251,7 +212,7 @@ object Reduce {
       *
       */
     private def eval(valproc: Var)(implicit env: Env[Par]): M[Par] =
-      costAccounting.modify(_ + VAR_EVAL_COST) *> {
+      costAccountingAlg.charge(VAR_EVAL_COST) *> {
         valproc.varInstance match {
           case BoundVar(level) =>
             env.get(level) match {
@@ -284,7 +245,7 @@ object Reduce {
       * @return A quoted process or "channel value"
       */
     private def eval(channel: Channel)(implicit env: Env[Par]): M[Quote] =
-      costAccounting.modify(_ + CHANNEL_EVAL_COST) *> {
+      costAccountingAlg.charge(CHANNEL_EVAL_COST) *> {
         channel.channelInstance match {
           case Quote(p) =>
             for {
@@ -343,7 +304,7 @@ object Reduce {
         // TODO(kyle): Make the matcher accept an environment, instead of substituting it.
         substTarget <- substitutePar[M].substitute(evaledTarget)(0, env)
         _           <- firstMatch(substTarget, mat.cases)
-        _           <- costAccounting.modify(_ + MATCH_EVAL_COST)
+        _           <- costAccountingAlg.charge(MATCH_EVAL_COST)
       } yield ()
     }
 
@@ -363,7 +324,7 @@ object Reduce {
 
       // TODO: should cost of `new` construct depend on the # of bindings?
       // they will be cost further in the reduction
-      eval(neu.p)(alloc(neu.bindCount)) <* costAccounting.modify(_ + NEW_EVAL_COST)
+      eval(neu.p)(alloc(neu.bindCount)) <* costAccountingAlg.charge(NEW_EVAL_COST)
     }
 
     private[this] def unbundleReceive(rb: ReceiveBind)(implicit env: Env[Par]): M[Quote] =
@@ -381,7 +342,7 @@ object Reduce {
                    case None =>
                      s.pure(subst)
                  }
-        _ <- costAccounting.modify(_ + UNBUNDLE_RECEIVE_COST)
+        _ <- costAccountingAlg.charge(UNBUNDLE_RECEIVE_COST)
       } yield unbndl
 
     private def eval(bundle: Bundle)(implicit env: Env[Par]): M[Unit] =
@@ -397,7 +358,7 @@ object Reduce {
         case EMethodBody(EMethod(method, target, arguments, _, _)) => {
           val methodLookup = methodTable(method)
           for {
-            _            <- costAccounting.modify(_ + METHOD_CALL_COST)
+            _            <- costAccountingAlg.charge(METHOD_CALL_COST)
             evaledTarget <- evalExpr(target)
             evaledArgs   <- arguments.toList.traverse(expr => evalExpr(expr))
             resultPar <- methodLookup match {
@@ -434,56 +395,56 @@ object Reduce {
 
       expr.exprInstance match {
         case x: GBool =>
-          Applicative[M].pure[Expr](x) <* costAccounting.modify(_ + BOOLEAN_COST)
-        case x: GInt => Applicative[M].pure[Expr](x) <* costAccounting.modify(_ + INT_COST)
+          Applicative[M].pure[Expr](x)
+        case x: GInt => Applicative[M].pure[Expr](x)
         case x: GString =>
-          Applicative[M].pure[Expr](x) <* costAccounting.modify(_ + stringCost(x.value))
+          Applicative[M].pure[Expr](x)
         case x: GUri =>
-          Applicative[M].pure[Expr](x) <* costAccounting.modify(_ + stringCost(x.value))
+          Applicative[M].pure[Expr](x)
         case x: GByteArray =>
-          Applicative[M].pure[Expr](x) <* costAccounting.modify(_ + byteArrayCost(x.value))
+          Applicative[M].pure[Expr](x)
         case ENotBody(ENot(p)) =>
           for {
             b <- evalToBool(p)
-            _ <- costAccounting.modify(_ + INT_COST)
+            _ <- costAccountingAlg.charge(INT_COST)
           } yield GBool(!b)
         case ENegBody(ENeg(p)) =>
           for {
             v <- evalToInt(p)
-            _ <- costAccounting.modify(_ + INT_COST)
+            _ <- costAccountingAlg.charge(INT_COST)
           } yield GInt(-v)
         case EMultBody(EMult(p1, p2)) =>
           for {
             v1 <- evalToInt(p1)
             v2 <- evalToInt(p2)
-            _  <- costAccounting.modify(_ + MULTIPLICATION_COST)
+            _  <- costAccountingAlg.charge(MULTIPLICATION_COST)
           } yield GInt(v1 * v2)
         case EDivBody(EDiv(p1, p2)) =>
           for {
             v1 <- evalToInt(p1)
             v2 <- evalToInt(p2)
-            _  <- costAccounting.modify(_ + DIVISION_COST)
+            _  <- costAccountingAlg.charge(DIVISION_COST)
           } yield GInt(v1 / v2)
         case EPlusBody(EPlus(p1, p2)) =>
           for {
             v1 <- evalToInt(p1)
             v2 <- evalToInt(p2)
-            _  <- costAccounting.modify(_ + SUM_COST)
+            _  <- costAccountingAlg.charge(SUM_COST)
           } yield GInt(v1 + v2)
         case EMinusBody(EMinus(p1, p2)) =>
           for {
             v1 <- evalToInt(p1)
             v2 <- evalToInt(p2)
-            _  <- costAccounting.modify(_ + SUBTRACTION_COST)
+            _  <- costAccountingAlg.charge(SUBTRACTION_COST)
           } yield GInt(v1 - v2)
         case ELtBody(ELt(p1, p2)) =>
-          relop(p1, p2, (_ < _), (_ < _), (_ < _)) <* costAccounting.modify(_ + COMPARISON_COST)
+          relop(p1, p2, (_ < _), (_ < _), (_ < _)) <* costAccountingAlg.charge(COMPARISON_COST)
         case ELteBody(ELte(p1, p2)) =>
-          relop(p1, p2, (_ <= _), (_ <= _), (_ <= _)) <* costAccounting.modify(_ + COMPARISON_COST)
+          relop(p1, p2, (_ <= _), (_ <= _), (_ <= _)) <* costAccountingAlg.charge(COMPARISON_COST)
         case EGtBody(EGt(p1, p2)) =>
-          relop(p1, p2, (_ > _), (_ > _), (_ > _)) <* costAccounting.modify(_ + COMPARISON_COST)
+          relop(p1, p2, (_ > _), (_ > _), (_ > _)) <* costAccountingAlg.charge(COMPARISON_COST)
         case EGteBody(EGte(p1, p2)) =>
-          relop(p1, p2, (_ >= _), (_ >= _), (_ >= _)) <* costAccounting.modify(_ + COMPARISON_COST)
+          relop(p1, p2, (_ >= _), (_ >= _), (_ >= _)) <* costAccountingAlg.charge(COMPARISON_COST)
         case EEqBody(EEq(p1, p2)) =>
           for {
             v1 <- evalExpr(p1)
@@ -491,7 +452,7 @@ object Reduce {
             // TODO: build an equality operator that takes in an environment.
             sv1 <- substitutePar[M].substitute(v1)(0, env)
             sv2 <- substitutePar[M].substitute(v2)(0, env)
-            _   <- costAccounting.modify(_ + COMPARISON_COST)
+            _   <- costAccountingAlg.charge(COMPARISON_COST)
           } yield GBool(sv1 == sv2)
         case ENeqBody(ENeq(p1, p2)) =>
           for {
@@ -499,19 +460,19 @@ object Reduce {
             v2  <- evalExpr(p2)
             sv1 <- substitutePar[M].substitute(v1)(0, env)
             sv2 <- substitutePar[M].substitute(v2)(0, env)
-            _   <- costAccounting.modify(_ + COMPARISON_COST)
+            _   <- costAccountingAlg.charge(COMPARISON_COST)
           } yield GBool(sv1 != sv2)
         case EAndBody(EAnd(p1, p2)) =>
           for {
             b1 <- evalToBool(p1)
             b2 <- evalToBool(p2)
-            _  <- costAccounting.modify(_ + COMPARISON_COST)
+            _  <- costAccountingAlg.charge(COMPARISON_COST)
           } yield GBool(b1 && b2)
         case EOrBody(EOr(p1, p2)) =>
           for {
             b1 <- evalToBool(p1)
             b2 <- evalToBool(p2)
-            _  <- costAccounting.modify(_ + COMPARISON_COST)
+            _  <- costAccountingAlg.charge(COMPARISON_COST)
           } yield GBool(b1 || b2)
         case EVarBody(EVar(v)) =>
           for {
@@ -522,21 +483,21 @@ object Reduce {
           for {
             evaledPs  <- el.ps.toList.traverse(expr => evalExpr(expr))
             updatedPs = evaledPs.map(updateLocallyFree)
-            _         <- costAccounting.modify(_ + collectionCost(evaledPs))
+            _         <- costAccountingAlg.charge(collectionCost(evaledPs))
           } yield updateLocallyFree(EList(updatedPs, el.locallyFree, el.connectiveUsed))
         }
         case ETupleBody(el) =>
           for {
             evaledPs  <- el.ps.toList.traverse(expr => evalExpr(expr))
             updatedPs = evaledPs.map(updateLocallyFree)
-            _         <- costAccounting.modify(_ + collectionCost(evaledPs))
+            _         <- costAccountingAlg.charge(collectionCost(evaledPs))
           } yield updateLocallyFree(ETuple(updatedPs, el.locallyFree, el.connectiveUsed))
 
         case ESetBody(set) =>
           for {
             evaledPs  <- set.ps.sortedPars.traverse(expr => evalExpr(expr))
             updatedPs = evaledPs.map(updateLocallyFree)
-            _         <- costAccounting.modify(_ + collectionCost(evaledPs))
+            _         <- costAccountingAlg.charge(collectionCost(evaledPs))
           } yield set.copy(ps = SortedParHashSet(updatedPs))
 
         case EMapBody(map) =>
@@ -548,7 +509,7 @@ object Reduce {
                              eValue <- evalExpr(value).map(updateLocallyFree)
                            } yield (eKey, eValue)
                        }
-            _ <- costAccounting.modify(_ + collectionCost(evaledPs) * 2)
+            _ <- costAccountingAlg.charge(collectionCost(evaledPs) * 2)
           } yield map.copy(ps = SortedParMap(evaledPs))
 
         case EMethodBody(EMethod(method, target, arguments, _, _)) => {
@@ -562,7 +523,7 @@ object Reduce {
                           case Some(f) => f(target, evaledArgs)(env)
                         }
             resultExpr <- evalSingleExpr(resultPar)
-            _ <- costAccounting.modify(_ + METHOD_CALL_COST)
+            _          <- costAccountingAlg.charge(METHOD_CALL_COST)
           } yield resultExpr
         }
         case EEvalBody(chan) =>
@@ -839,7 +800,7 @@ object Reduce {
       else
         p.exprs match {
           case Expr(GInt(v)) +: Nil =>
-            Applicative[M].pure(v) <* costAccounting.modify(_ + INT_COST)
+            Applicative[M].pure(v) <* costAccountingAlg.charge(INT_COST)
           case Expr(EVarBody(EVar(v))) +: Nil =>
             for {
               p      <- eval(v)
@@ -866,7 +827,7 @@ object Reduce {
       else
         p.exprs match {
           case Expr(GBool(b)) +: Nil =>
-            Applicative[M].pure(b) <* costAccounting.modify(_ + BOOLEAN_COST)
+            Applicative[M].pure(b) <* costAccountingAlg.charge(BOOLEAN_COST)
           case Expr(EVarBody(EVar(v))) +: Nil =>
             for {
               p       <- eval(v)

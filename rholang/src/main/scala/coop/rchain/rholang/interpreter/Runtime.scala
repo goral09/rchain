@@ -9,7 +9,7 @@ import coop.rchain.models.TaggedContinuation.TaggedCont.ScalaBodyRef
 import coop.rchain.models.Var.VarInstance.FreeVar
 import coop.rchain.models.rholang.implicits._
 import coop.rchain.models.{BindPattern, Channel, TaggedContinuation, Var}
-import coop.rchain.rholang.interpreter.accounting.CostAccount
+import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
 import coop.rchain.rholang.interpreter.storage.implicits._
 import coop.rchain.rspace._
 import coop.rchain.rspace.history.Branch
@@ -27,10 +27,10 @@ class Runtime private (
                                   Seq[Channel],
                                   Seq[Channel],
                                   TaggedContinuation],
-    val costAccounting: MonadState[Task, CostAccount],
+    val costAccounting: CostAccountingAlg[Task],
     var errorLog: ErrorLog) {
   def readAndClearErrorVector(): Vector[Throwable] = errorLog.readAndClearErrorVector()
-  def getCost(): Task[CostAccount]                 = costAccounting.get
+  def getCost(): Task[CostAccount]                 = costAccounting.getTotal
   def close(): Unit                                = space.close()
 }
 
@@ -77,8 +77,9 @@ object Runtime {
 
     val errorLog                                  = new ErrorLog()
     implicit val ft: FunctorTell[Task, Throwable] = errorLog
-    implicit val costAccounting: MonadState[Task, CostAccount] =
-      AtomicRefMonadState.of[Task, CostAccount](CostAccount.zero)
+    val costState                                 = AtomicRefMonadState.of[Task, CostAccount](CostAccount.zero)
+    implicit val costAccounting: CostAccountingAlg[Task] =
+      CostAccountingAlg.monadState(costState)
 
     lazy val dispatcher: Dispatch[Task, Seq[Channel], TaggedContinuation] =
       RholangAndScalaDispatcher
