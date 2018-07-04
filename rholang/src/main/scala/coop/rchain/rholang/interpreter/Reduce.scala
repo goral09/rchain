@@ -2,31 +2,27 @@ package coop.rchain.rholang.interpreter
 
 import cats.effect.Sync
 import cats.implicits._
-import cats.mtl.{FunctorTell, MonadState}
-import cats.{Applicative, FlatMap, MonadError, Parallel, Eval => _}
+import cats.mtl.FunctorTell
+import cats.{Applicative, FlatMap, Parallel, Eval => _}
 import com.google.protobuf.ByteString
 import coop.rchain.crypto.codec.Base16
 import coop.rchain.models.Channel.ChannelInstance
 import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
 import coop.rchain.models.Expr.ExprInstance._
-import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
 import coop.rchain.models.Var.VarInstance
 import coop.rchain.models.Var.VarInstance.{BoundVar, FreeVar, Wildcard}
 import coop.rchain.models.rholang.implicits._
 import coop.rchain.models.serialization.implicits._
 import coop.rchain.models.{Match, MatchCase, GPrivate => _, _}
 import coop.rchain.rholang.interpreter.Substitute._
+import coop.rchain.rholang.interpreter.accounting._
 import coop.rchain.rholang.interpreter.errors._
-import coop.rchain.models.rholang.implicits._
-import coop.rchain.rholang.interpreter.storage.implicits._
+import coop.rchain.rholang.interpreter.storage.TuplespaceAlg
 import coop.rchain.rspace.Serialize
-import coop.rchain.rspace.pure.PureRSpace
 import monix.eval.Coeval
 
 import scala.collection.immutable.BitSet
 import scala.util.Try
-import accounting._
-import coop.rchain.rholang.interpreter.storage.TuplespaceAlg
 
 // Notes: Caution, a type annotation is often needed for Env.
 
