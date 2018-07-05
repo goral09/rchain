@@ -12,10 +12,6 @@ trait Costs {
   final val BOOLEAN_COST: Cost = 1
   final val INT_COST: Cost     = 2
 
-  def stringCost(str: String): Cost               = str.getBytes().size
-  def byteArrayCost(byteString: ByteString): Cost = BigInt(byteString.size())
-  def collectionCost(l: List[_]): Cost            = BigInt(l.size)
-
   final val SUM_COST: Cost         = 3
   final val SUBTRACTION_COST: Cost = 3
 
