@@ -3,7 +3,7 @@ package coop.rchain.rholang.interpreter
 import cats.effect.Sync
 import cats.implicits._
 import cats.mtl.FunctorTell
-import cats.{Applicative, FlatMap, Parallel, Eval => _}
+import cats.{Applicative, FlatMap, Monad, Parallel, Eval => _}
 import com.google.protobuf.ByteString
 import coop.rchain.crypto.codec.Base16
 import coop.rchain.models.Channel.ChannelInstance
@@ -136,7 +136,7 @@ object Reduce {
                 p <- evalExprToPar(Expr(e))
                 _ <- eval(p)
               } yield ()).handleError(fTell.tell)
-            case _ => Applicative[M].pure(())
+            case _ => s.unit
         })
       ).parSequence.as(Unit)
     }
@@ -162,21 +162,22 @@ object Reduce {
       */
     private def eval(send: Send)(implicit env: Env[Par]): M[Unit] =
       for {
-        quote <- eval(send.chan)
-        data  <- send.data.toList.traverse(x => evalExpr(x))
-
+        quote   <- eval(send.chan)
         subChan <- substituteQuote[M].substitute(quote)(0, env)
         unbundled <- subChan.value.singleBundle() match {
                       case Some(value) =>
                         if (!value.writeFlag) {
                           s.raiseError(ReduceError("Trying to send on non-writeable channel."))
                         } else {
-                          s.pure(Quote(value.body))
+                          Applicative[M].pure(Quote(value.body))
                         }
                       case None => Applicative[M].pure(subChan)
                     }
+
+        data <- send.data.toList.traverse(x => evalExpr(x))
         substData <- data.traverse(
                       substitutePar[M].substitute(_)(0, env).map(p => Channel(Quote(p))))
+
         _ <- produce(unbundled, substData, send.persistent)
         _ <- costAccountingAlg.charge(SEND_EVAL_COST)
       } yield ()
@@ -208,12 +209,12 @@ object Reduce {
       *
       */
     private def eval(valproc: Var)(implicit env: Env[Par]): M[Par] =
-      costAccountingAlg.charge(VAR_EVAL_COST) *> {
+      costAccountingAlg.charge(VAR_EVAL_COST) *> { //TODO: should variable evaluation depend on the env size?
         valproc.varInstance match {
           case BoundVar(level) =>
             env.get(level) match {
               case Some(par) =>
-                s.pure(par)
+                Applicative[M].pure(par)
               case None =>
                 s.raiseError(ReduceError("Unbound variable: " + level + " in " + env.envMap))
             }
@@ -318,9 +319,8 @@ object Reduce {
           _env.put(addr)
         }
 
-      // TODO: should cost of `new` construct depend on the # of bindings?
-      // they will be cost further in the reduction
-      eval(neu.p)(alloc(neu.bindCount)) <* costAccountingAlg.charge(NEW_EVAL_COST)
+      costAccountingAlg.charge(newBindingsCost(neu.bindCount)) *>
+      eval(neu.p)(alloc(neu.bindCount))
     }
 
     private[this] def unbundleReceive(rb: ReceiveBind)(implicit env: Env[Par]): M[Quote] =
@@ -333,10 +333,10 @@ object Reduce {
                      if (!value.readFlag) {
                        s.raiseError(ReduceError("Trying to read from non-readable channel."))
                      } else {
-                       s.pure(Quote(value.body))
+                       Applicative[M].pure(Quote(value.body))
                      }
                    case None =>
-                     s.pure(subst)
+                     Applicative[M].pure(subst)
                  }
         _ <- costAccountingAlg.charge(UNBUNDLE_RECEIVE_COST)
       } yield unbndl
@@ -392,7 +392,8 @@ object Reduce {
       expr.exprInstance match {
         case x: GBool =>
           Applicative[M].pure[Expr](x)
-        case x: GInt => Applicative[M].pure[Expr](x)
+        case x: GInt =>
+          Applicative[M].pure[Expr](x)
         case x: GString =>
           Applicative[M].pure[Expr](x)
         case x: GUri =>
@@ -402,12 +403,10 @@ object Reduce {
         case ENotBody(ENot(p)) =>
           for {
             b <- evalToBool(p)
-            _ <- costAccountingAlg.charge(INT_COST)
           } yield GBool(!b)
         case ENegBody(ENeg(p)) =>
           for {
             v <- evalToInt(p)
-            _ <- costAccountingAlg.charge(INT_COST)
           } yield GInt(-v)
         case EMultBody(EMult(p1, p2)) =>
           for {
@@ -448,7 +447,7 @@ object Reduce {
             // TODO: build an equality operator that takes in an environment.
             sv1 <- substitutePar[M].substitute(v1)(0, env)
             sv2 <- substitutePar[M].substitute(v2)(0, env)
-            _   <- costAccountingAlg.charge(COMPARISON_COST)
+            _   <- costAccountingAlg.charge(equalityCheckCost(sv1, sv2))
           } yield GBool(sv1 == sv2)
         case ENeqBody(ENeq(p1, p2)) =>
           for {
@@ -456,19 +455,19 @@ object Reduce {
             v2  <- evalExpr(p2)
             sv1 <- substitutePar[M].substitute(v1)(0, env)
             sv2 <- substitutePar[M].substitute(v2)(0, env)
-            _   <- costAccountingAlg.charge(COMPARISON_COST)
+            _   <- costAccountingAlg.charge(equalityCheckCost(sv1, sv2))
           } yield GBool(sv1 != sv2)
         case EAndBody(EAnd(p1, p2)) =>
           for {
             b1 <- evalToBool(p1)
             b2 <- evalToBool(p2)
-            _  <- costAccountingAlg.charge(COMPARISON_COST)
+            _  <- costAccountingAlg.charge(BOOLEAN_AND_COST)
           } yield GBool(b1 && b2)
         case EOrBody(EOr(p1, p2)) =>
           for {
             b1 <- evalToBool(p1)
             b2 <- evalToBool(p2)
-            _  <- costAccountingAlg.charge(COMPARISON_COST)
+            _  <- costAccountingAlg.charge(BOOLEAN_OR_COST)
           } yield GBool(b1 || b2)
         case EVarBody(EVar(v)) =>
           for {
@@ -479,21 +478,18 @@ object Reduce {
           for {
             evaledPs  <- el.ps.toList.traverse(expr => evalExpr(expr))
             updatedPs = evaledPs.map(updateLocallyFree)
-            _         <- costAccountingAlg.charge(collectionCost(evaledPs))
           } yield updateLocallyFree(EList(updatedPs, el.locallyFree, el.connectiveUsed))
         }
         case ETupleBody(el) =>
           for {
             evaledPs  <- el.ps.toList.traverse(expr => evalExpr(expr))
             updatedPs = evaledPs.map(updateLocallyFree)
-            _         <- costAccountingAlg.charge(collectionCost(evaledPs))
           } yield updateLocallyFree(ETuple(updatedPs, el.locallyFree, el.connectiveUsed))
 
         case ESetBody(set) =>
           for {
             evaledPs  <- set.ps.sortedPars.traverse(expr => evalExpr(expr))
             updatedPs = evaledPs.map(updateLocallyFree)
-            _         <- costAccountingAlg.charge(collectionCost(evaledPs))
           } yield set.copy(ps = SortedParHashSet(updatedPs))
 
         case EMapBody(map) =>
@@ -505,7 +501,6 @@ object Reduce {
                              eValue <- evalExpr(value).map(updateLocallyFree)
                            } yield (eKey, eValue)
                        }
-            _ <- costAccountingAlg.charge(collectionCost(evaledPs) * 2)
           } yield map.copy(ps = SortedParMap(evaledPs))
 
         case EMethodBody(EMethod(method, target, arguments, _, _)) => {
@@ -549,6 +544,7 @@ object Reduce {
             for {
               nth <- evalToInt(args(0))(env)
               v   <- evalSingleExpr(p)(env)
+              _   <- costAccountingAlg.charge(nthMethodCost(nth))
               result <- v.exprInstance match {
                          case EListBody(EList(ps, _, _, _)) =>
                            s.fromEither(localNth(ps, nth))
@@ -576,10 +572,11 @@ object Reduce {
           if (args.nonEmpty) {
             s.raiseError(ReduceError("Error: toByteArray does not take arguments"))
           } else {
-            evalExpr(p)(env)
-              .map(serialize(_))
-              .flatMap(s.fromEither)
-              .map(b => Expr(GByteArray(ByteString.copyFrom(b))))
+            for {
+              exprEvaled <- evalExpr(p)(env)
+              _          <- costAccountingAlg.charge(toByteArrayCost(exprEvaled))
+              ba         <- s.fromEither(serialize(exprEvaled))
+            } yield Expr(GByteArray(ByteString.copyFrom(ba)))
           }
         }
     }
@@ -594,8 +591,12 @@ object Reduce {
               def decodingError(th: Throwable) =
                 ReduceError(
                   s"Error: exception was thrown when decoding input string to hexadecimal: ${th.getMessage}")
-              Try(Expr(GByteArray(ByteString.copyFrom(Base16.decode(encoded)))))
-                .fold(th => s.raiseError[Par](decodingError(th)), x => s.pure[Par](x))
+              for {
+                _           <- costAccountingAlg.charge(hexToByteCost(encoded))
+                encodingRes = Try(ByteString.copyFrom(Base16.decode(encoded)))
+                res <- encodingRes.fold(th => s.raiseError(th),
+                                        ba => Applicative[M].pure[Par](Expr(GByteArray(ba))))
+              } yield res
             case _ =>
               s.raiseError(ReduceError("Error: hexToBytes can be called only on single strings."))
           }
@@ -617,19 +618,21 @@ object Reduce {
       def union(baseExpr: Expr, otherExpr: Expr): M[Expr] =
         (baseExpr.exprInstance, otherExpr.exprInstance) match {
           case (ESetBody(base @ ParSet(basePs, _, _)), ESetBody(other @ ParSet(otherPs, _, _))) =>
-            Applicative[M].pure[Expr](
-              ESetBody(
-                ParSet(basePs.union(otherPs.sortedPars.toSet),
-                       base.connectiveUsed || other.connectiveUsed,
-                       locallyFreeUnion(base.locallyFree, other.locallyFree))))
+            costAccountingAlg.charge(basePs.size * ADD_COST) *>
+              Applicative[M].pure[Expr](
+                ESetBody(
+                  ParSet(basePs.union(otherPs.sortedPars.toSet),
+                         base.connectiveUsed || other.connectiveUsed,
+                         locallyFreeUnion(base.locallyFree, other.locallyFree))))
           case (EMapBody(base @ ParMap(baseMap, _, _)), EMapBody(other @ ParMap(otherMap, _, _))) =>
-            Applicative[M].pure[Expr](
-              EMapBody(
-                ParMap((baseMap ++ otherMap.sortedMap).toSeq,
-                       base.connectiveUsed || other.connectiveUsed,
-                       locallyFreeUnion(base.locallyFree, other.locallyFree))
+            costAccountingAlg.charge(baseMap.size * ADD_COST) *>
+              Applicative[M].pure[Expr](
+                EMapBody(
+                  ParMap((baseMap ++ otherMap.sortedMap).toSeq,
+                         base.connectiveUsed || other.connectiveUsed,
+                         locallyFreeUnion(base.locallyFree, other.locallyFree))
+                )
               )
-            )
           case _ =>
             s.raiseError(
               ReduceError(
@@ -650,21 +653,26 @@ object Reduce {
     private[this] def diff: MethodType = { (p: Par, args: Seq[Par]) => (env: Env[Par]) =>
       def locallyFreeUnion(base: Coeval[BitSet], other: Coeval[BitSet]): Coeval[BitSet] =
         base.flatMap(b => other.map(o => b | o))
+
       def diff(baseExpr: Expr, otherExpr: Expr): M[Expr] =
         (baseExpr.exprInstance, otherExpr.exprInstance) match {
           case (ESetBody(base @ ParSet(basePs, _, _)), ESetBody(other @ ParSet(otherPs, _, _))) =>
-            Applicative[M].pure[Expr](
-              ESetBody(
-                ParSet(basePs.diff(otherPs.sortedPars.toSet),
-                       base.connectiveUsed || other.connectiveUsed,
-                       locallyFreeUnion(base.locallyFree, other.locallyFree))))
+            // diff is implemented in terms of foldLeft that at each step
+            // removes one element from the collection.
+            costAccountingAlg.charge(basePs.size * REMOVE_COST) *>
+              Applicative[M].pure[Expr](
+                ESetBody(
+                  ParSet(basePs.diff(otherPs.sortedPars.toSet),
+                         base.connectiveUsed || other.connectiveUsed,
+                         locallyFreeUnion(base.locallyFree, other.locallyFree))))
           case (EMapBody(ParMap(basePs, _, _)), EMapBody(ParMap(otherPs, _, _))) =>
             val newMap = basePs -- otherPs.keys
-            Applicative[M].pure[Expr](
-              EMapBody(ParMap(newMap))
-            )
+            costAccountingAlg.charge(basePs.size * REMOVE_COST) *>
+              Applicative[M].pure[Expr](
+                EMapBody(ParMap(newMap))
+              )
           case _ =>
-            s.raiseError(ReduceError("Error: diff applied to something that wasn't a Set"))
+            s.raiseError(ReduceError("Error: diff can be called on Map or Set."))
         }
       method("diff", 1, args) {
         for {
@@ -694,6 +702,7 @@ object Reduce {
           baseExpr <- evalSingleExpr(p)(env)
           element  <- evalExpr(args(0))(env)
           result   <- add(baseExpr, element)
+          _        <- costAccountingAlg.charge(ADD_COST)
         } yield result
       }
     }
@@ -722,6 +731,7 @@ object Reduce {
           baseExpr <- evalSingleExpr(p)(env)
           element  <- evalExpr(args(0))(env)
           result   <- delete(baseExpr, element)
+          _        <- costAccountingAlg.charge(REMOVE_COST)
         } yield result
       }
     }
@@ -742,6 +752,7 @@ object Reduce {
           baseExpr <- evalSingleExpr(p)(env)
           element  <- evalExpr(args(0))(env)
           result   <- contains(baseExpr, element)
+          _        <- costAccountingAlg.charge(LOOKUP_COST)
         } yield result
       }
     }
@@ -760,6 +771,7 @@ object Reduce {
           baseExpr <- evalSingleExpr(p)(env)
           key      <- evalExpr(args(0))(env)
           result   <- get(baseExpr, key)
+          _        <- costAccountingAlg.charge(LOOKUP_COST)
         } yield result
       }
     }
@@ -796,7 +808,7 @@ object Reduce {
       else
         p.exprs match {
           case Expr(GInt(v)) +: Nil =>
-            Applicative[M].pure(v) <* costAccountingAlg.charge(INT_COST)
+            Applicative[M].pure(v)
           case Expr(EVarBody(EVar(v))) +: Nil =>
             for {
               p      <- eval(v)
@@ -823,7 +835,7 @@ object Reduce {
       else
         p.exprs match {
           case Expr(GBool(b)) +: Nil =>
-            Applicative[M].pure(b) <* costAccountingAlg.charge(BOOLEAN_COST)
+            Applicative[M].pure(b)
           case Expr(EVarBody(EVar(v))) +: Nil =>
             for {
               p       <- eval(v)
