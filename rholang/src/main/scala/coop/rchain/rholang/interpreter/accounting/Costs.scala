@@ -1,6 +1,5 @@
 package coop.rchain.rholang.interpreter.accounting
 
-import com.google.protobuf.ByteString
 import coop.rchain.models.Par
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
