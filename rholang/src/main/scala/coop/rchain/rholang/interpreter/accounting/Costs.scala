@@ -28,8 +28,6 @@ trait Costs {
   final val MULTIPLICATION_COST: Cost = 9
   final val DIVISION_COST: Cost       = 9
 
-  final val UNBUNDLE_RECEIVE_COST = 10
-
   // operations on collections
   // source: https://docs.scala-lang.org/overviews/collections/performance-characteristics.html
   final val LOOKUP_COST = 3 // map/set lookup is eC

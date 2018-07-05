@@ -338,7 +338,6 @@ object Reduce {
                    case None =>
                      Applicative[M].pure(subst)
                  }
-        _ <- costAccountingAlg.charge(UNBUNDLE_RECEIVE_COST)
       } yield unbndl
 
     private def eval(bundle: Bundle)(implicit env: Env[Par]): M[Unit] =
