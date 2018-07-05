@@ -23,10 +23,10 @@ final class AtomicRefMonadState[F[_], S] private (private val ar: AtomicReferenc
 
   override def modify(f: S => S): F[Unit] = {
     @tailrec
-    def spin: Unit = {
+    def spin(): Unit = {
       val c = ar.get
       val u = f(c)
-      if (!ar.compareAndSet(c, u)) spin
+      if (!ar.compareAndSet(c, u)) spin()
       else ()
     }
     F.delay(spin)
