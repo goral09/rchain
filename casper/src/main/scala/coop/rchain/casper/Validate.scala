@@ -5,9 +5,9 @@ import cats.implicits._
 import com.google.protobuf.ByteString
 import coop.rchain.blockstorage.BlockStore
 import coop.rchain.casper.Estimator.{BlockHash, Validator}
-import coop.rchain.casper.protocol.{ApprovedBlock, BlockMessage, Justification}
+import coop.rchain.casper.protocol._
 import coop.rchain.casper.util.DagOperations.bfTraverse
-import coop.rchain.casper.util.{ProtoUtil}
+import coop.rchain.casper.util.ProtoUtil
 import coop.rchain.casper.util.ProtoUtil.bonds
 import coop.rchain.casper.util.rholang.{InterpreterUtil, RuntimeManager}
 import coop.rchain.casper.util.rholang.RuntimeManager.StateHash
@@ -39,20 +39,21 @@ object Validate {
   def ignore(b: BlockMessage, reason: String): String =
     s"CASPER: Ignoring block ${PrettyPrinter.buildString(b.blockHash)} because $reason"
 
-  def approvedBlock[F[_]: Applicative: Log](a: ApprovedBlock,
+  def approvedBlock[F[_]: Applicative: Log](candidate: Option[ApprovedBlockCandidate],
+                                            sigs: Seq[coop.rchain.casper.protocol.Signature],
                                             requiredValidators: Set[ByteString]): F[Boolean] = {
     val maybeSigData = for {
-      c     <- a.candidate
+      c     <- candidate
       bytes = c.toByteArray
     } yield Blake2b256.hash(bytes)
 
-    val requiredSigs = a.candidate.map(_.requiredSigs).getOrElse(0)
+    val requiredSigs = candidate.map(_.requiredSigs).getOrElse(0)
 
     maybeSigData match {
       case Some(sigData) =>
         val validatedSigs =
           (for {
-            s      <- a.sigs
+            s      <- sigs
             verify <- signatureVerifiers.get(s.algorithm)
             pk     = s.publicKey
             if verify(sigData, s.sig.toByteArray, pk.toByteArray)

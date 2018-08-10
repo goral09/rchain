@@ -13,8 +13,10 @@ import coop.rchain.casper.util.rholang.{InterpreterUtil, RuntimeManager}
 import coop.rchain.crypto.signatures.Ed25519
 import coop.rchain.rholang.collection.LinkedList
 import coop.rchain.rholang.interpreter.Runtime
+import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{FlatSpec, Matchers}
+import coop.rchain.catscontrib.TaskContrib._
 
 class RholangBuildTest extends FlatSpec with Matchers {
 
@@ -45,12 +47,16 @@ class RholangBuildTest extends FlatSpec with Matchers {
       "for(@primes <- @\"primes\"){ @\"primes\"!(primes) | @[\"LinkedList\", \"map\"]!(primes, \"double\", \"dprimes\") }"
     ).map(s => ProtoUtil.termDeploy(InterpreterUtil.mkTerm(s).right.get))
 
-    val Some(signedBlock) = MultiParentCasper[Id].deploy(llDeploy) *>
-      deploys.traverse(MultiParentCasper[Id].deploy) *>
-      MultiParentCasper[Id].createBlock
-    MultiParentCasper[Id].addBlock(signedBlock)
+    val task = MultiParentCasper[Task].deploy(llDeploy) *>
+      deploys.traverse(MultiParentCasper[Task].deploy) *>
+      MultiParentCasper[Task].createBlock
+    val Some(signedBlock) = task.unsafeRunSync
 
-    val storage = HashSetCasperTest.blockTuplespaceContents(signedBlock)
+    MultiParentCasper[Task].addBlock(signedBlock).unsafeRunSync
+
+    val storage =
+      HashSetCasperTest.blockTuplespaceContents(signedBlock)(HashSetCasperTest.taskComonad,
+                                                             MultiParentCasper[Task])
 
     logEff.warns should be(Nil)
     storage.contains("@{\"primes\"}!([2, [3, [5, [7, []]]]])") should be(true)

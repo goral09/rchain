@@ -2,9 +2,7 @@ package coop.rchain.casper.util.comm
 
 import cats.Id
 import cats.implicits._
-
 import com.google.protobuf.ByteString
-
 import coop.rchain.casper.HashSetCasperTest
 import coop.rchain.casper.helper.HashSetCasperTestNode
 import coop.rchain.casper.protocol._
@@ -15,7 +13,9 @@ import coop.rchain.crypto.signatures.Ed25519
 import coop.rchain.comm.protocol.rchain.Packet
 import coop.rchain.comm.transport
 import coop.rchain.p2p.EffectsTestInstances._
-
+import monix.eval.Task
+import TaskContrib._
+import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{FlatSpec, Matchers}
 
 class BlockApproverProtocolTest extends FlatSpec with Matchers {
@@ -26,7 +26,7 @@ class BlockApproverProtocolTest extends FlatSpec with Matchers {
     val (approver, node) = createIdProtocol(n)
     val unapproved       = createUnapproved(n, node.genesis)
 
-    approver.unapprovedBlockPacketHandler(node.local)(unapprovedToPacket(unapproved))
+    approver.unapprovedBlockPacketHandler(node.local)(unapprovedToPacket(unapproved)).unsafeRunSync
 
     node.logEff.infos.exists(_.contains("Approval sent in response")) should be(true)
     node.logEff.warns.isEmpty should be(true)
@@ -40,8 +40,12 @@ class BlockApproverProtocolTest extends FlatSpec with Matchers {
     val differentUnapproved1 = createUnapproved(n / 2, node.genesis) //wrong number of signatures
     val differentUnapproved2 = createUnapproved(n, BlockMessage.defaultInstance) //wrong block
 
-    approver.unapprovedBlockPacketHandler(node.local)(unapprovedToPacket(differentUnapproved1))
-    approver.unapprovedBlockPacketHandler(node.local)(unapprovedToPacket(differentUnapproved2))
+    approver
+      .unapprovedBlockPacketHandler(node.local)(unapprovedToPacket(differentUnapproved1))
+      .unsafeRunSync
+    approver
+      .unapprovedBlockPacketHandler(node.local)(unapprovedToPacket(differentUnapproved2))
+      .unsafeRunSync
 
     node.logEff.warns.count(_.contains("Received unexpected candidate")) should be(2)
 
@@ -56,7 +60,7 @@ object BlockApproverProtocolTest {
   def unapprovedToPacket(u: UnapprovedBlock): Packet =
     Packet(transport.UnapprovedBlock.id, u.toByteString)
 
-  def createIdProtocol(requiredSigs: Int): (BlockApproverProtocol[Id], HashSetCasperTestNode) = {
+  def createIdProtocol(requiredSigs: Int): (BlockApproverProtocol[Task], HashSetCasperTestNode) = {
     import monix.execution.Scheduler.Implicits.global
 
     val (sk, pk) = Ed25519.newKeyPair
@@ -64,7 +68,7 @@ object BlockApproverProtocolTest {
     val node     = HashSetCasperTestNode.network(Vector(sk), genesis).head
     import node._
 
-    new BlockApproverProtocol[Id](node.validatorId, genesis, requiredSigs) -> node
+    new BlockApproverProtocol[Task](node.validatorId, genesis, requiredSigs) -> node
   }
 
 }

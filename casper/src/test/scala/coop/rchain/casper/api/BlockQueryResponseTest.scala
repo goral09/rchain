@@ -1,8 +1,8 @@
 package coop.rchain.casper.api
 
 import cats._
-import cats.implicits._
 import com.google.protobuf.ByteString
+import cats.implicits._
 import coop.rchain.blockstorage.BlockStore
 import coop.rchain.casper.Estimator.{BlockHash, Validator}
 import coop.rchain.casper._
@@ -11,6 +11,7 @@ import coop.rchain.casper.protocol._
 import coop.rchain.casper.util.ProtoUtil
 import coop.rchain.p2p.EffectsTestInstances.LogStub
 import org.scalatest.{FlatSpec, Matchers}
+import coop.rchain.catscontrib.effect.implicits.syncId
 
 class BlockQueryResponseTest extends FlatSpec with Matchers with BlockStoreFixture {
   val secondBlockQuery = "1234"
@@ -75,17 +76,16 @@ class BlockQueryResponseTest extends FlatSpec with Matchers with BlockStoreFixtu
 
   // TODO: Test tsCheckpoint:
   // we should be able to stub in a tuplespace dump but there is currently no way to do that.
-  "getBlockQueryResponse" should "return successful block info response" in withStore {
+  "getBlockQueryResponse" should "return successful block info response" in withStore[Id, Unit] {
     implicit blockStore =>
-      implicit val casperEffect = testCasper[Id]
-      implicit val logEff       = new LogStub[Id]
-      implicit val constructorEffect =
-        MultiParentCasperConstructor
-          .successCasperConstructor[Id](ApprovedBlock.defaultInstance, casperEffect)
-      implicit val turanOracleEffect: SafetyOracle[Id] = SafetyOracle.turanOracle[Id]
-      val q                                            = BlockQuery(hash = secondBlockQuery)
-      val blockQueryResponse                           = BlockAPI.getBlockQueryResponse[Id](q)
-      val blockInfo                                    = blockQueryResponse.blockInfo.get
+      implicit val casperEff = testCasper[Id](syncId, blockStore)
+      implicit val logEff    = new LogStub[Id]()(syncId)
+      implicit val turanOracleEff: SafetyOracle[Id] =
+        SafetyOracle.turanOracle[Id](syncId, blockStore)
+      val q = BlockQuery(hash = secondBlockQuery)
+      val blockQueryResponse =
+        BlockAPI.getBlockQueryResponse[Id](q)(syncId, casperEff, logEff, turanOracleEff, blockStore)
+      val blockInfo = blockQueryResponse.blockInfo.get
       blockQueryResponse.status should be("Success")
       blockInfo.blockHash should be(secondHashString)
       blockInfo.blockSize should be(secondBlock.serializedSize.toString)
@@ -98,16 +98,15 @@ class BlockQueryResponseTest extends FlatSpec with Matchers with BlockStoreFixtu
       blockInfo.sender should be(secondBlockSenderString)
   }
 
-  "getBlockQueryResponse" should "return error when no block exists" in withStore {
+  "getBlockQueryResponse" should "return error when no block exists" in withStore[Id, Unit] {
     implicit blockStore =>
-      implicit val casperEffect = testCasper[Id]
-      implicit val logEff       = new LogStub[Id]
-      implicit val constructorEffect =
-        MultiParentCasperConstructor
-          .successCasperConstructor[Id](ApprovedBlock.defaultInstance, casperEffect)
-      implicit val turanOracleEffect: SafetyOracle[Id] = SafetyOracle.turanOracle[Id]
-      val q                                            = BlockQuery(hash = badTestHashQuery)
-      val blockQueryResponse                           = BlockAPI.getBlockQueryResponse[Id](q)
+      implicit val casperEff = testCasper[Id](syncId, blockStore)
+      implicit val logEff    = new LogStub[Id]()(syncId)
+      implicit val turanOracleEff: SafetyOracle[Id] =
+        SafetyOracle.turanOracle[Id](syncId, blockStore)
+      val q = BlockQuery(hash = badTestHashQuery)
+      val blockQueryResponse =
+        BlockAPI.getBlockQueryResponse[Id](q)(syncId, casperEff, logEff, turanOracleEff, blockStore)
       blockQueryResponse.status should be(
         s"Error: Failure to find block with hash ${badTestHashQuery}")
   }

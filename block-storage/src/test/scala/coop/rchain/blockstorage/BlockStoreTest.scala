@@ -1,8 +1,8 @@
 package coop.rchain.blockstorage
 
 import scala.language.higherKinds
-
 import cats._
+import cats.effect.Sync
 import com.google.protobuf.ByteString
 import coop.rchain.blockstorage.BlockStore.BlockHash
 import coop.rchain.casper.protocol.{BlockMessage, Header}
@@ -14,6 +14,7 @@ import org.scalacheck.Gen._
 import org.scalactic.anyvals.PosInt
 import org.scalatest._
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
+import coop.rchain.catscontrib.effect.implicits.syncId
 import scala.util.control.NonFatal
 
 trait BlockStoreTest
@@ -54,7 +55,7 @@ trait BlockStoreTest
   private[this] val blockStoreElementsGen: Gen[List[(String, BlockMessage)]] =
     distinctListOfGen(blockStoreElementGen)(_._1 == _._1)
 
-  def withStore[R](f: BlockStore[Id] => R): R
+  def withStore[F[_]: Sync, R](f: BlockStore[F] => R): R
 
   // TODO: move to `shared` along with code in coop.rchain.rspace.test.ArbitraryInstances
   /**
@@ -87,12 +88,12 @@ trait BlockStoreTest
     }
   }
 
-  "Block Store" should "return None on get while it's empty" in withStore { store =>
+  "Block Store" should "return None on get while it's empty" in withStore[Id, Assertion] { store =>
     store.get(blockHashGen.sample.get) shouldBe None
   }
 
   it should "return Some(message) on get for a published key" in {
-    withStore { store =>
+    withStore[Id, Unit] { store =>
       forAll(blockStoreElementsGen, minSize(0), sizeRange(10)) { blockStoreElements =>
         val items = blockStoreElements
         items.foreach(store.put(_))
@@ -107,7 +108,7 @@ trait BlockStoreTest
   }
 
   it should "overwrite existing value" in
-    withStore { store =>
+    withStore[Id, Unit] { store =>
       forAll(blockStoreElementsGen, minSize(0), sizeRange(10)) { blockStoreElements =>
         val items = blockStoreElements.map {
           case (hash, elem) =>
@@ -124,7 +125,7 @@ trait BlockStoreTest
     }
 
   it should "rollback the transaction on error" in {
-    withStore { store =>
+    withStore[Id, Assertion] { store =>
       store.asMap().size shouldEqual 0
       def elem = {
         blockStoreElementGen.sample.get
@@ -140,8 +141,8 @@ trait BlockStoreTest
 }
 
 class InMemBlockStoreTest extends BlockStoreTest {
-  override def withStore[R](f: BlockStore[Id] => R): R = {
-    val store = InMemBlockStore.createWithId
+  override def withStore[F[_]: Sync, R](f: BlockStore[F] => R): R = {
+    val store = InMemBlockStore.createWithF[F]
     f(store)
   }
 }
@@ -153,10 +154,10 @@ class LMDBBlockStoreTest extends BlockStoreTest {
   private[this] def mkTmpDir(): Path = Files.createTempDirectory("block-store-test-")
   private[this] val mapSize: Long    = 100L * 1024L * 1024L * 4096L
 
-  override def withStore[R](f: BlockStore[Id] => R): R = {
+  override def withStore[F[_]: Sync, R](f: BlockStore[F] => R): R = {
     val dbDir = mkTmpDir()
     val env   = Context.env(dbDir, mapSize)
-    val store = LMDBBlockStore.createWithId(env, dbDir)
+    val store = LMDBBlockStore.createWith[F](env, dbDir)
     try {
       f(store)
     } finally {

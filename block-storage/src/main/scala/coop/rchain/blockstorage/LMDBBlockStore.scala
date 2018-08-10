@@ -142,10 +142,10 @@ object LMDBBlockStore {
     new LMDBBlockStore[F](env, path, blocks)
   }
 
-  def createWithId(env: Env[ByteBuffer], path: Path): BlockStore[Id] = {
+  def createWith[F[_]: Sync](env: Env[ByteBuffer], path: Path): BlockStore[F] = {
     import coop.rchain.metrics.Metrics.MetricsNOP
     import coop.rchain.catscontrib.effect.implicits._
-    implicit val metrics: Metrics[Id] = new MetricsNOP[Id]()(syncId)
-    LMDBBlockStore.create(env, path)(syncId, metrics)
+    implicit val metricsNOP: Metrics[F] = new MetricsNOP[F]
+    LMDBBlockStore.create[F](env, path)
   }
 }

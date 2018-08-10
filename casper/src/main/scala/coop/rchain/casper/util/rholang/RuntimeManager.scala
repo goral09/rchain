@@ -26,6 +26,7 @@ import coop.rchain.rspace.trace.Produce
 import monix.eval.Task
 
 import scala.collection.immutable
+import coop.rchain.catscontrib.TaskContrib._
 
 //runtime is a SyncVar for thread-safety, as all checkpoints share the same "hot store"
 class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: SyncVar[Runtime]) {

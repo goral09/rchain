@@ -1,23 +1,22 @@
 package coop.rchain.casper.util.comm
 
-import com.google.protobuf.ByteString
 import cats.Monad
+import cats.effect.{Concurrent, Timer}
 import cats.implicits._
-import coop.rchain.catscontrib.Capture
-import coop.rchain.casper.{MultiParentCasper, MultiParentCasperConstructor, PrettyPrinter, Validate}
-import coop.rchain.casper.protocol._
-import coop.rchain.comm.{PeerNode, ProtocolHelper}
-import coop.rchain.comm.protocol.rchain.Packet
-import coop.rchain.crypto.codec.Base16
-import coop.rchain.p2p.effects._
-import coop.rchain.comm.rp._
-import coop.rchain.comm.transport
-import coop.rchain.comm.transport.{PacketType, TransportLayer}
-import coop.rchain.comm.transport.CommMessages.{packet, toPacket}
+import com.google.protobuf.ByteString
 import coop.rchain.blockstorage.BlockStore
-import coop.rchain.comm.discovery._
+import coop.rchain.casper._
+import coop.rchain.casper.protocol._
+import coop.rchain.catscontrib.Capture
 import coop.rchain.comm.CommError.ErrorHandler
+import coop.rchain.comm.discovery._
+import coop.rchain.comm.protocol.rchain.Packet
+import coop.rchain.comm.rp._
+import coop.rchain.comm.transport.CommMessages.{packet, toPacket}
+import coop.rchain.comm.transport.{PacketType, TransportLayer}
+import coop.rchain.comm.{transport, PeerNode, ProtocolHelper}
 import coop.rchain.metrics.Metrics
+import coop.rchain.p2p.effects._
 import coop.rchain.shared._
 
 import scala.concurrent.duration._
@@ -60,7 +59,7 @@ object CommUtil {
     } yield ()
 
   def requestApprovedBlock[
-      F[_]: Monad: Capture: MultiParentCasperConstructor: Log: Time: Metrics: TransportLayer: NodeDiscovery: ErrorHandler: PacketHandler]
+      F[_]: Concurrent: Capture: Log: Time: Timer: Metrics: TransportLayer: NodeDiscovery: ErrorHandler: PacketHandler: LastApprovedBlock]
     : F[Unit] = {
     val request = ApprovedBlockRequest("PleaseSendMeAnApprovedBlock").toByteString
 
@@ -75,7 +74,7 @@ object CommUtil {
           _ <- send match {
                 case Left(err) =>
                   Log[F].info(s"CASPER: Failed to get response from $peer because: $err") *>
-                    askPeers(rest, local)
+                    askPeers(rest :+ peer, local)
 
                 case Right(response) =>
                   Log[F]
@@ -86,23 +85,20 @@ object CommUtil {
 
                       (maybeSender, maybePacket) match {
                         case (Some(sender), Some(_)) =>
-                          HandleMessages
-                            .handlePacket[F](sender, maybePacket)
-                            .flatMap(_ => {
-                              MultiParentCasperConstructor[F].lastApprovedBlock.flatMap {
-                                case Some(_) => ().pure[F] //valid ApprovedBlock received
-                                case None    => askPeers(rest, local)
-                              }
-                            })
+                          for {
+                            _             <- HandleMessages.handlePacket[F](sender, maybePacket)
+                            lastApprovedO <- LastApprovedBlock[F].getOptional(500.millis)
+                            _             <- lastApprovedO.fold(askPeers(rest :+ peer, local))(_ => ().pure[F])
+                          } yield ()
                         case (None, _) =>
                           Log[F].error(
                             s"CASPER: Response from $peer invalid. The sender of the message could not be determined.") *> askPeers(
-                            rest,
+                            rest :+ peer,
                             local)
                         case (Some(_), None) =>
                           Log[F].error(
                             s"CASPER: Response from $peer invalid. A packet was expected, but received ${response.message}.") *> askPeers(
-                            rest,
+                            rest :+ peer,
                             local)
                       }
                     })
@@ -110,11 +106,12 @@ object CommUtil {
               }
         } yield ()
 
-      case Nil => ().pure[F]
+      case Nil =>
+        ().pure[F] // This should not happen because we loop over the peers appending ones we've just queried
     }
 
     for {
-      a     <- MultiParentCasperConstructor[F].lastApprovedBlock
+      a     <- LastApprovedBlock[F].getOptional(500.millis)
       peers <- NodeDiscovery[F].peers
       local <- TransportLayer[F].local
       _     <- a.fold(askPeers(peers.toList, local))(_ => ().pure[F])
@@ -122,42 +119,24 @@ object CommUtil {
   }
 
   def casperPacketHandler[
-      F[_]: Monad: MultiParentCasperConstructor: NodeDiscovery: TransportLayer: Log: Time: ErrorHandler: BlockStore](
+      F[_]: Monad: MultiParentCasper: CasperPackageHandler: NodeDiscovery: TransportLayer: Log: Time: ErrorHandler: BlockStore: LastApprovedBlock](
       peer: PeerNode): PartialFunction[Packet, F[Option[Packet]]] =
     Function
       .unlift(
         (p: Packet) => {
-          packetToBlockRequest(p) orElse packetToApprovedBlock(p) orElse packetToApprovedBlockRequest(
-            p) orElse packetToBlockMessage(p)
+          packetToBlockRequest(p) orElse packetToApprovedBlockRequest(p) orElse packetToBlockMessage(
+            p)
         }
       )
       .andThen {
         case b @ (_: BlockMessage | _: BlockRequest) =>
-          MultiParentCasperConstructor[F].casperInstance match {
-            case Left(ex) =>
-              Log[F]
-                .warn(
-                  "CASPER: a Casper message was received, " +
-                    "however could not be processed due to the following error. " +
-                    ex.getMessage
-                )
-                .map(_ => none[Packet])
-
-            case Right(casper) =>
-              implicit val casperEvidence: MultiParentCasper[F] = casper
-              blockPacketHandler[F](peer, b)
-          }
-
-        case a: ApprovedBlock =>
-          Log[F].info("CASPER: Received ApprovedBlock. Processing...") *>
-            MultiParentCasperConstructor[F].receive(a).map(_ => none[Packet])
+          blockPacketHandler[F](peer, b)
 
         case _: ApprovedBlockRequest =>
-          for {
-            _ <- Log[F].info(s"CASPER: Received ApprovedBlockRequest from $peer")
-            a <- MultiParentCasperConstructor[F].lastApprovedBlock
-          } yield a.map(b => Packet(transport.ApprovedBlock.id, b.toByteString))
-      }
+          Log[F].info(s"CASPER: Received ApprovedBlockRequest from $peer") *>
+            LastApprovedBlock[F].get.map(b =>
+              Packet(transport.ApprovedBlock.id, b.toByteString).some)
+      } orElse CasperPackageHandler[F].handle(peer)
 
   def blockPacketHandler[
       F[_]: Monad: MultiParentCasper: NodeDiscovery: TransportLayer: Log: Time: ErrorHandler: BlockStore](

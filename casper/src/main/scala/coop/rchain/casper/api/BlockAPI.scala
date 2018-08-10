@@ -14,102 +14,70 @@ import coop.rchain.shared.Log
 
 object BlockAPI {
 
-  def deploy[F[_]: Monad: MultiParentCasperConstructor: Log](
-      d: DeployData): F[DeployServiceResponse] = {
-    def casperDeploy(implicit casper: MultiParentCasper[F]): F[DeployServiceResponse] =
-      InterpreterUtil.mkTerm(d.term) match {
-        case Right(term) =>
-          val deploy = Deploy(
-            term = Some(term),
-            raw = Some(d)
-          )
-          for {
-            _ <- MultiParentCasper[F].deploy(deploy)
-          } yield DeployServiceResponse(true, "Success!")
+  def deploy[F[_]: Monad: MultiParentCasper: Log](d: DeployData): F[DeployServiceResponse] =
+    InterpreterUtil.mkTerm(d.term) match {
+      case Right(term) =>
+        val deploy = Deploy(
+          term = Some(term),
+          raw = Some(d)
+        )
+        for {
+          _ <- MultiParentCasper[F].deploy(deploy)
+        } yield DeployServiceResponse(true, "Success!")
 
-        case Left(err) =>
-          DeployServiceResponse(false, s"Error in parsing term: \n$err").pure[F]
+      case Left(err) =>
+        DeployServiceResponse(false, s"Error in parsing term: \n$err").pure[F]
+    }
+
+  def createBlock[F[_]: Monad: MultiParentCasper: Log]: F[MaybeBlockMessage] =
+    MultiParentCasper[F].createBlock.map(MaybeBlockMessage(_))
+
+  def addBlock[F[_]: Monad: MultiParentCasper: Log](b: BlockMessage): F[DeployServiceResponse] =
+    for {
+      status <- MultiParentCasper[F].addBlock(b)
+    } yield
+      status match {
+        case _: InvalidBlock => DeployServiceResponse(false, s"Failure! Invalid block: $status")
+        case _: ValidBlock   => DeployServiceResponse(true, s"Success! $status")
+        case BlockException(ex) =>
+          DeployServiceResponse(false, s"Error during block processing: $ex")
+        case Processing =>
+          DeployServiceResponse(
+            false,
+            s"No action taken since another thread is already processing the block.")
       }
 
-    MultiParentCasperConstructor
-      .withCasper[F, DeployServiceResponse](
-        casperDeploy(_),
-        DeployServiceResponse(false, s"Error: Casper instance not available"))
-  }
+  def getBlocksResponse[F[_]: Monad: MultiParentCasper: Log: SafetyOracle: BlockStore]
+    : F[BlocksResponse] =
+    for {
+      estimates   <- MultiParentCasper[F].estimator
+      tip         = estimates.head
+      internalMap <- BlockStore[F].asMap()
+      mainChain: IndexedSeq[BlockMessage] = ProtoUtil.getMainChain(internalMap,
+                                                                   tip,
+                                                                   IndexedSeq.empty[BlockMessage])
+      blockInfos <- mainChain.toList.traverse(getBlockInfo[F])
+    } yield
+      BlocksResponse(status = "Success", blocks = blockInfos, length = blockInfos.length.toLong)
 
-  def createBlock[F[_]: Monad: MultiParentCasperConstructor: Log]: F[MaybeBlockMessage] =
-    MultiParentCasperConstructor.withCasper[F, MaybeBlockMessage](
-      _.createBlock.map(MaybeBlockMessage.apply),
-      MaybeBlockMessage.defaultInstance)
-
-  def addBlock[F[_]: Monad: MultiParentCasperConstructor: Log](
-      b: BlockMessage): F[DeployServiceResponse] = {
-    def doAddBlock(implicit casper: MultiParentCasper[F]): F[DeployServiceResponse] =
-      for {
-        status <- MultiParentCasper[F].addBlock(b)
-      } yield
-        status match {
-          case _: InvalidBlock => DeployServiceResponse(false, s"Failure! Invalid block: $status")
-          case _: ValidBlock   => DeployServiceResponse(true, s"Success! $status")
-          case BlockException(ex) =>
-            DeployServiceResponse(false, s"Error during block processing: $ex")
-          case Processing =>
-            DeployServiceResponse(
-              false,
-              s"No action taken since another thread is already processing the block.")
-        }
-
-    MultiParentCasperConstructor
-      .withCasper[F, DeployServiceResponse](
-        doAddBlock(_),
-        DeployServiceResponse(false, "Error: Casper instance not available"))
-  }
-
-  def getBlocksResponse[F[_]: Monad: MultiParentCasperConstructor: Log: SafetyOracle: BlockStore]
-    : F[BlocksResponse] = {
-    def casperResponse(implicit casper: MultiParentCasper[F]) =
-      for {
-        estimates   <- MultiParentCasper[F].estimator
-        tip         = estimates.head
-        internalMap <- BlockStore[F].asMap()
-        mainChain: IndexedSeq[BlockMessage] = ProtoUtil.getMainChain(internalMap,
-                                                                     tip,
-                                                                     IndexedSeq.empty[BlockMessage])
-        blockInfos <- mainChain.toList.traverse(getBlockInfo[F])
-      } yield
-        BlocksResponse(status = "Success", blocks = blockInfos, length = blockInfos.length.toLong)
-
-    MultiParentCasperConstructor.withCasper[F, BlocksResponse](
-      casperResponse(_),
-      BlocksResponse(status = "Error: Casper instance not available"))
-  }
-
-  def getBlockQueryResponse[
-      F[_]: Monad: MultiParentCasperConstructor: Log: SafetyOracle: BlockStore](
-      q: BlockQuery): F[BlockQueryResponse] = {
-    def casperResponse(implicit casper: MultiParentCasper[F]) =
-      for {
-        dag        <- MultiParentCasper[F].blockDag
-        maybeBlock <- getBlock[F](q, dag)
-        blockQueryResponse <- maybeBlock match {
-                               case Some(block) => {
-                                 for {
-                                   blockInfo <- getBlockInfo[F](block)
-                                 } yield
-                                   BlockQueryResponse(status = "Success",
-                                                      blockInfo = Some(blockInfo))
-                               }
-                               case None =>
-                                 BlockQueryResponse(
-                                   status = s"Error: Failure to find block with hash ${q.hash}")
-                                   .pure[F]
+  def getBlockQueryResponse[F[_]: Monad: MultiParentCasper: Log: SafetyOracle: BlockStore](
+      q: BlockQuery): F[BlockQueryResponse] =
+    for {
+      dag        <- MultiParentCasper[F].blockDag
+      maybeBlock <- getBlock[F](q, dag)
+      blockQueryResponse <- maybeBlock match {
+                             case Some(block) => {
+                               for {
+                                 blockInfo <- getBlockInfo[F](block)
+                               } yield
+                                 BlockQueryResponse(status = "Success", blockInfo = Some(blockInfo))
                              }
-      } yield blockQueryResponse
-
-    MultiParentCasperConstructor.withCasper[F, BlockQueryResponse](
-      casperResponse(_),
-      BlockQueryResponse(status = "Error: Casper instance not available"))
-  }
+                             case None =>
+                               BlockQueryResponse(
+                                 status = s"Error: Failure to find block with hash ${q.hash}")
+                                 .pure[F]
+                           }
+    } yield blockQueryResponse
 
   private def getBlockInfo[F[_]: Monad: MultiParentCasper: SafetyOracle: BlockStore](
       block: BlockMessage): F[BlockInfo] =

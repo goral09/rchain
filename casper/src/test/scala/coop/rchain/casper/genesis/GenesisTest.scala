@@ -15,6 +15,7 @@ import coop.rchain.rholang.interpreter.storage.StoragePrinter
 import coop.rchain.p2p.EffectsTestInstances.{LogStub, LogicalTime}
 import java.io.PrintWriter
 import java.nio.file.Files
+import coop.rchain.catscontrib.effect.implicits.syncId
 
 import coop.rchain.casper.helper.BlockStoreFixture
 import monix.execution.Scheduler.Implicits.global
@@ -132,7 +133,7 @@ class GenesisTest extends FlatSpec with Matchers with BeforeAndAfterEach with Bl
       ) should be(true)
   }
 
-  it should "create a valid genesis block" in withStore { implicit store =>
+  it should "create a valid genesis block" in withStore[Id, Unit] { implicit store =>
     val activeRuntime  = Runtime.create(storageLocation, storageSize)
     val runtimeManager = RuntimeManager.fromRuntime(activeRuntime)
     val emptyStateHash = runtimeManager.emptyStateHash

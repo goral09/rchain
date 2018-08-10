@@ -7,12 +7,7 @@ import coop.rchain.blockstorage.LMDBBlockStore
 import coop.rchain.casper.protocol._
 import coop.rchain.casper.util.comm.CommUtil.casperPacketHandler
 import coop.rchain.casper.util.comm.TransportLayerTestImpl
-import coop.rchain.casper.{
-  MultiParentCasper,
-  MultiParentCasperConstructor,
-  SafetyOracle,
-  ValidatorIdentity
-}
+import coop.rchain.casper.{CasperPackageHandler, MultiParentCasper, SafetyOracle, ValidatorIdentity}
 import coop.rchain.catscontrib._
 import coop.rchain.comm._
 import coop.rchain.crypto.signatures.Ed25519

@@ -25,8 +25,7 @@ import scala.util.Try
   * Validator side of the protocol defined in
   * https://rchain.atlassian.net/wiki/spaces/CORE/pages/485556483/Initializing+the+Blockchain+--+Protocol+for+generating+the+Genesis+block
   */
-class BlockApproverProtocol[
-    F[_]: Capture: Monad: NodeDiscovery: TransportLayer: Log: Time: ErrorHandler](
+class BlockApproverProtocol[F[_]: Capture: Monad: TransportLayer: Log: Time](
     validatorId: ValidatorIdentity,
     block: BlockMessage,
     requiredSigs: Int) {
@@ -57,7 +56,9 @@ class BlockApproverProtocol[
 }
 
 object BlockApproverProtocol {
-  def packetToUnapprovedBlock(msg: Packet): Option[UnapprovedBlock] =
+  def apply[F[_]](implicit ev: BlockApproverProtocol[F]): BlockApproverProtocol[F] = ev
+
+  private def packetToUnapprovedBlock(msg: Packet): Option[UnapprovedBlock] =
     if (msg.typeId == transport.UnapprovedBlock.id)
       Try(UnapprovedBlock.parseFrom(msg.content.toByteArray)).toOption
     else None

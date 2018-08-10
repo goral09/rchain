@@ -16,6 +16,8 @@ import coop.rchain.casper._
 import coop.rchain.casper.helper.{BlockGenerator, BlockStoreTestFixture}
 import coop.rchain.casper.helper.BlockGenerator._
 import coop.rchain.catscontrib.Catscontrib
+import coop.rchain.comm.PeerNode
+import coop.rchain.comm.protocol.rchain.Packet
 import coop.rchain.p2p.EffectsTestInstances.LogStub
 import org.scalatest.{FlatSpec, Matchers}
 
@@ -92,11 +94,8 @@ class BlocksResponseTest
       def lastFinalizedBlock: F[BlockMessage]                            = BlockMessage().pure[F]
       def storageContents(hash: BlockHash): F[String]                    = "".pure[F]
     }
-  implicit val casperEffect = testCasper[Id]
-  implicit val logEff       = new LogStub[Id]
-  implicit val constructorEffect =
-    MultiParentCasperConstructor
-      .successCasperConstructor[Id](ApprovedBlock.defaultInstance, casperEffect)
+  implicit val casperEffect                        = testCasper[Id]
+  implicit val logEff                              = new LogStub[Id]
   implicit val turanOracleEffect: SafetyOracle[Id] = SafetyOracle.turanOracle[Id]
 
   "getBlocksResponse" should "return only blocks in the main chain" in {

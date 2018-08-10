@@ -5,12 +5,13 @@ import java.nio.file.{Path, Paths}
 
 import coop.rchain.blockstorage.LMDBBlockStore
 import coop.rchain.casper.CasperConf
+import coop.rchain.casper.CasperConf.{Bootstrap, Standalone}
 import coop.rchain.comm.{PeerNode, UPnP}
 import coop.rchain.node.IpChecker
 import coop.rchain.node.configuration.toml.{Configuration => TomlConfiguration}
 import coop.rchain.shared.{Log, LogSource}
-
 import monix.eval.Task
+import scala.concurrent.duration._
 
 object Configuration {
   private implicit val logSource: LogSource = LogSource(this.getClass)
@@ -109,7 +110,7 @@ object Configuration {
             DefaultNumValidators,
             dataDir.resolve("genesis"),
             None,
-            createGenesis = false
+            mode = Bootstrap
           ),
           LMDBBlockStore.Config(dataDir.resolve("casper-block-store"), DefaultCasperBlockStoreSize),
           options
@@ -225,7 +226,7 @@ object Configuration {
         numValidators,
         dataDir.resolve("genesis"),
         walletsFile,
-        standalone
+        Standalone(requiredSigs = 0, duration = 5.minutes, interval = 1.second) //TODO(mateusz.gorski) extract from configuration
       )
     val blockstorage = LMDBBlockStore.Config(
       dataDir.resolve("casper-block-store"),

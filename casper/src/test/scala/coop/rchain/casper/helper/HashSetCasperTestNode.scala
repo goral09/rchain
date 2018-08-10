@@ -1,16 +1,11 @@
 package coop.rchain.casper.helper
 
-import cats.{Applicative, ApplicativeError, Id}
+import cats.{Applicative, ApplicativeError, Id, Monad}
 import cats.implicits._
 import coop.rchain.casper.protocol._
 import coop.rchain.casper.util.comm.CommUtil.casperPacketHandler
 import coop.rchain.casper.util.comm.TransportLayerTestImpl
-import coop.rchain.casper.{
-  MultiParentCasper,
-  MultiParentCasperConstructor,
-  SafetyOracle,
-  ValidatorIdentity
-}
+import coop.rchain.casper._
 import coop.rchain.catscontrib._
 import coop.rchain.comm._
 import coop.rchain.crypto.signatures.Ed25519
@@ -24,21 +19,26 @@ import coop.rchain.comm.protocol.routing._
 import coop.rchain.rholang.interpreter.Runtime
 import java.nio.file.Files
 
+import cats.effect.{Concurrent, Sync}
+import cats.effect.concurrent.{Deferred, Ref}
 import coop.rchain.casper.util.rholang.RuntimeManager
 import monix.execution.Scheduler
 
 import scala.concurrent.duration.{FiniteDuration, MILLISECONDS}
 import scala.collection.mutable
 import coop.rchain.shared.PathOps.RichPath
-
+import TaskContrib._
 import scala.util.Random
 import coop.rchain.catscontrib.effect.implicits._
-import coop.rchain.shared.Cell
+import coop.rchain.comm.discovery.NodeDiscovery
+import coop.rchain.comm.protocol.rchain.Packet
+import coop.rchain.shared.{Cell, Log}
 import monix.eval.Task
 
+// Since we now share
 class HashSetCasperTestNode(name: String,
                             val local: PeerNode,
-                            tle: TransportLayerTestImpl[Id],
+                            tle: TransportLayerTestImpl[Task],
                             val genesis: BlockMessage,
                             sk: Array[Byte],
                             storageSize: Long = 1024L * 1024)(implicit scheduler: Scheduler) {
@@ -47,18 +47,18 @@ class HashSetCasperTestNode(name: String,
 
   private val storageDirectory = Files.createTempDirectory(s"hash-set-casper-test-$name")
 
-  implicit val logEff            = new LogStub[Id]
-  implicit val timeEff           = new LogicalTime[Id]
-  implicit val nodeDiscoveryEff  = new NodeDiscoveryStub[Id]()
+  implicit val logEff            = new LogStub[Task]
+  implicit val timeEff           = new LogicalTime[Task]
+  implicit val nodeDiscoveryEff  = new NodeDiscoveryStub[Task]()
   implicit val transportLayerEff = tle
-  implicit val metricEff         = new Metrics.MetricsNOP[Id]
-  implicit val errorHandlerEff   = errorHandler
+  implicit val metricEff         = new Metrics.MetricsNOP[Task]
+  implicit val errorHandlerEff   = errorHandler[Task]
   val dir                        = BlockStoreTestFixture.dbDir
-  implicit val blockStore        = BlockStoreTestFixture.create(dir)
+  implicit val blockStore        = BlockStoreTestFixture.create[Task](dir)
   // pre-population removed from internals of Casper
   blockStore.put(genesis.blockHash, genesis)
-  implicit val turanOracleEffect = SafetyOracle.turanOracle[Id]
-  implicit val connectionsCell   = Cell.const[Id, Connections](Connect.Connections.empty)
+  implicit val turanOracleEffect = SafetyOracle.turanOracle[Task]
+  implicit val connectionsCell   = Cell.const[Task, Connections](Connect.Connections.empty)
 
   val activeRuntime                  = Runtime.create(storageDirectory, storageSize)
   val runtimeManager                 = RuntimeManager.fromRuntime(activeRuntime)
@@ -67,18 +67,26 @@ class HashSetCasperTestNode(name: String,
   val validatorId = ValidatorIdentity(Ed25519.toPublic(sk), sk, "ed25519")
 
   implicit val casperEff =
-    MultiParentCasper
-      .hashSetCasper[Id](runtimeManager, Some(validatorId), genesis, blockStore.asMap())
-  implicit val constructor = MultiParentCasperConstructor
-    .successCasperConstructor[Id](
-      ApprovedBlock(candidate = Some(ApprovedBlockCandidate(block = Some(genesis)))),
-      casperEff)
+    blockStore
+      .asMap()
+      .map { m =>
+        MultiParentCasper
+          .hashSetCasper[Task](runtimeManager, Some(validatorId), genesis, m)
+      }
+      .unsafeRunSync
 
-  implicit val packetHandlerEff = PacketHandler.pf[Id](
-    casperPacketHandler[Id]
-  )
+  implicit val constructor = new CasperPackageHandler[Task] {}
 
-  def receive(): Unit = tle.receive(p => handle[Id](p, defaultTimeout))
+  private implicit val lastApprovedBlock: LastApprovedBlock[Task] =
+    LastApprovedBlock.of[Task].unsafeRunSync
+  lastApprovedBlock
+    .complete(ApprovedBlock(Some(ApprovedBlockCandidate(Some(genesis)))))
+    .unsafeRunSync
+
+  implicit val packetHandlerEff =
+    PacketHandler.pf[Task](peer => casperPacketHandler[Task](peer))
+
+  def receive(): Unit = tle.receive(p => handle[Task](p, defaultTimeout))
 
   def tearDown(): Unit = {
     tearDownNode()
@@ -97,7 +105,7 @@ object HashSetCasperTestNode {
     val name     = "standalone"
     val identity = peerNode(name, 40400)
     val tle =
-      new TransportLayerTestImpl[Id](identity, Map.empty[PeerNode, mutable.Queue[Protocol]])
+      new TransportLayerTestImpl[Task](identity, Map.empty[PeerNode, mutable.Queue[Protocol]])
 
     new HashSetCasperTestNode(name, identity, tle, genesis, sk)
   }
@@ -112,7 +120,7 @@ object HashSetCasperTestNode {
     val nodes =
       names.zip(peers).zip(sks).map {
         case ((n, p), sk) =>
-          val tle = new TransportLayerTestImpl[Id](p, msgQueues)
+          val tle = new TransportLayerTestImpl[Task](p, msgQueues)
           new HashSetCasperTestNode(n, p, tle, genesis, sk)
       }
 
@@ -128,10 +136,10 @@ object HashSetCasperTestNode {
     nodes
   }
 
-  val appErrId = new ApplicativeError[Id, CommError] {
-    def ap[A, B](ff: Id[A => B])(fa: Id[A]): Id[B] = Applicative[Id].ap[A, B](ff)(fa)
-    def pure[A](x: A): Id[A]                       = Applicative[Id].pure[A](x)
-    def raiseError[A](e: CommError): Id[A] = {
+  def appErrF[F[_]: Sync] = new ApplicativeError[F, CommError] {
+    def ap[A, B](ff: F[A => B])(fa: F[A]): F[B] = Applicative[F].ap[A, B](ff)(fa)
+    def pure[A](x: A): F[A]                     = Applicative[F].pure[A](x)
+    def raiseError[A](e: CommError): F[A] = {
       val errString = e match {
         case UnknownCommError(msg)                => s"UnknownCommError($msg)"
         case DatagramSizeError(size)              => s"DatagramSizeError($size)"
@@ -153,13 +161,18 @@ object HashSetCasperTestNode {
         case _                                    => e.toString
       }
 
-      throw new Exception(errString)
+      Sync[F].delay(throw new Exception(errString))
     }
 
-    def handleErrorWith[A](fa: Id[A])(f: (CommError) => Id[A]): Id[A] = fa
+    def handleErrorWith[A](fa: F[A])(f: (CommError) => F[A]): F[A] = Sync[F].suspend {
+      fa.flatMap {
+        case commErr: CommError => f(commErr)
+        case _                  => fa
+      }
+    }
   }
 
-  val errorHandler = ApplicativeError_.applicativeError[Id, CommError](appErrId)
+  def errorHandler[F[_]: Sync] = ApplicativeError_.applicativeError[F, CommError](appErrF[F])
 
   def randomBytes(length: Int): Array[Byte] = Array.fill(length)(Random.nextInt(256).toByte)
 

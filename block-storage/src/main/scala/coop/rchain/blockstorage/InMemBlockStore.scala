@@ -54,15 +54,15 @@ object InMemBlockStore {
                       metricsF: Metrics[F]): BlockStore[F] =
     new InMemBlockStore()
 
-  def createWithId: BlockStore[Id] = {
+  def createWithF[F[_]: Sync]: BlockStore[F] = {
     import coop.rchain.metrics.Metrics.MetricsNOP
     import coop.rchain.catscontrib.effect.implicits._
-    val refId                         = emptyMapRef[Id](syncId)
-    implicit val metrics: Metrics[Id] = new MetricsNOP[Id]()(syncId)
-    InMemBlockStore.create(syncId, refId, metrics)
+    implicit val refId               = emptyMapRef[F]
+    implicit val metrics: Metrics[F] = new MetricsNOP[F]()
+    InMemBlockStore.create
   }
 
-  def emptyMapRef[F[_]](implicit syncEv: Sync[F]): F[Ref[F, Map[BlockHash, BlockMessage]]] =
-    Ref[F].of(Map.empty[BlockHash, BlockMessage])
+  def emptyMapRef[F[_]](implicit syncEv: Sync[F]): Ref[F, Map[BlockHash, BlockMessage]] =
+    Ref.unsafe(Map.empty[BlockHash, BlockMessage])
 
 }

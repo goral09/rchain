@@ -1,9 +1,9 @@
 package coop.rchain.casper.util.comm
 
 import com.google.protobuf.ByteString
-import coop.rchain.casper.HashSetCasperTest
 import coop.rchain.casper.helper.HashSetCasperTestNode
 import coop.rchain.casper.protocol._
+import coop.rchain.casper.{HashSetCasperTest, LastApprovedBlock}
 import coop.rchain.catscontrib.TaskContrib._
 import coop.rchain.catscontrib._
 import coop.rchain.comm.{Endpoint, NodeIdentifier, PeerNode}
@@ -14,15 +14,18 @@ import coop.rchain.shared.Log.NOPLog
 import coop.rchain.shared.Time
 import monix.eval.Task
 import monix.execution.schedulers.TestScheduler
-import scala.concurrent.duration._
 import org.scalatest.{FlatSpec, Matchers}
+
+import scala.concurrent.duration._
 
 class ApproveBlockProtocolTest extends FlatSpec with Matchers {
   "ApproveBlockProtocol" should "add valid signatures it receives to its state" in {
-    implicit val time = new LogicalTime[Task]()
-    implicit val ctx  = TestScheduler()
-    val abp           = ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond)
-    val a             = ApproveBlockProtocolTest.approval(abp.candidate)
+    implicit val time         = new LogicalTime[Task]()
+    implicit val ctx          = TestScheduler()
+    implicit val lastApproved = LastApprovedBlock.of[Task].unsafeRunSync
+    val abp =
+      ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond)
+    val a = ApproveBlockProtocolTest.approval(abp.candidate)
 
     val cancelToken = abp.run().fork.runAsync
     abp.currentSigs.unsafeRunSync.size should be(0)
@@ -32,11 +35,21 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
     cancelToken.cancel()
   }
 
+  it should "send UnapprovedBlock message at regular intervals" in {
+    pending
+  }
+
+  it should "send ApprovedBlock message when approved block has been created" in {
+    pending
+  }
+
   it should "not change the number of signatures in its state if the same one is given multiple times" in {
-    implicit val time = new LogicalTime[Task]()
-    implicit val ctx  = TestScheduler()
-    val abp           = ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond)
-    val a             = ApproveBlockProtocolTest.approval(abp.candidate)
+    implicit val time         = new LogicalTime[Task]()
+    implicit val ctx          = TestScheduler()
+    implicit val lastApproved = LastApprovedBlock.of[Task].unsafeRunSync
+    val abp =
+      ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond)
+    val a = ApproveBlockProtocolTest.approval(abp.candidate)
 
     val cancelToken = abp.run().fork.runAsync
     abp.currentSigs.unsafeRunSync.size should be(0)
@@ -50,10 +63,12 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
   }
 
   it should "not add invalid signatures it receives to its state" in {
-    implicit val time = new LogicalTime[Task]()
-    implicit val ctx  = TestScheduler()
-    val abp           = ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond)
-    val a             = ApproveBlockProtocolTest.invalidApproval(abp.candidate)
+    implicit val time         = new LogicalTime[Task]()
+    implicit val ctx          = TestScheduler()
+    implicit val lastApproved = LastApprovedBlock.of[Task].unsafeRunSync
+    val abp =
+      ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond)
+    val a = ApproveBlockProtocolTest.invalidApproval(abp.candidate)
 
     val cancelToken = abp.run().fork.runAsync
     ctx.tick(1.millisecond)
@@ -65,12 +80,15 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
   }
 
   it should "create an approved block if at least the correct number of signatures is collected after the duration has elapsed" in {
-    val n: Int            = 10
-    val d: FiniteDuration = 30.milliseconds
-    implicit val time     = new LogicalTime[Task]()
-    implicit val ctx      = TestScheduler()
+    val n: Int                = 10
+    val d: FiniteDuration     = 30.milliseconds
+    implicit val time         = new LogicalTime[Task]()
+    implicit val ctx          = TestScheduler()
+    implicit val lastApproved = LastApprovedBlock.of[Task].unsafeRunSync
     implicit val abp =
-      ApproveBlockProtocolTest.createProtocol(n, duration = d, interval = 1.millisecond)
+      ApproveBlockProtocolTest.createProtocol(requiredSigs = n,
+                                              duration = d,
+                                              interval = 1.millisecond)
     val c = abp.candidate
 
     val startTime = abp.start.milliseconds
@@ -86,19 +104,22 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
 
     val expectedApproved = coop.rchain.casper.protocol.ApprovedBlock(Some(c), sigs)
     ctx.tick(21.milliseconds)
-    abp.approvedBlock.runAsync.value.nonEmpty should be(true)
-    abp.approvedBlock.runAsync.value.get should be('success)
+    lastApproved.get.runAsync.value.nonEmpty should be(true)
+    lastApproved.get.runAsync.value.get should be('success)
     ctx.clockMonotonic(MILLISECONDS) should be(abp.start + d.toMillis + 1)
     cancelToken.cancel()
   }
 
   it should "continue collecting signatures if not enough are collected after the duration has elapsed" in {
-    val n: Int            = 10
-    val d: FiniteDuration = 30.milliseconds
-    implicit val time     = new LogicalTime[Task]()
-    implicit val ctx      = TestScheduler()
+    val n: Int                = 10
+    val d: FiniteDuration     = 30.milliseconds
+    implicit val time         = new LogicalTime[Task]()
+    implicit val ctx          = TestScheduler()
+    implicit val lastApproved = LastApprovedBlock.of[Task].unsafeRunSync
     implicit val abp =
-      ApproveBlockProtocolTest.createProtocol(n, duration = d, interval = 1.millisecond)
+      ApproveBlockProtocolTest.createProtocol(requiredSigs = n,
+                                              duration = d,
+                                              interval = 1.millisecond)
     val c = abp.candidate
 
     val startTime = abp.start
@@ -111,7 +132,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
       ctx.tick(1.millisecond)
     }
 
-    abp.approvedBlock.runAsync.value.nonEmpty should be(false)
+    lastApproved.get.runAsync.value.nonEmpty should be(false)
 
     (1 to (n / 2 + 1)).foreach { _ =>
       abp.addApproval(ApproveBlockProtocolTest.approval(c)).unsafeRunSync
@@ -122,18 +143,21 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
     // since we started at `startTime` and we advanced internal clock `n` times x 1 millisecond
     // we still have to advance internal clock with missing milliseconds
     ctx.tick((d.toMillis - timeElapsed).milliseconds)
-    abp.approvedBlock.runAsync.value.nonEmpty should be(true)
-    abp.approvedBlock.runAsync.value.get shouldBe 'success
+    lastApproved.get.runAsync.value.nonEmpty should be(true)
+    lastApproved.get.runAsync.value.get should be('success)
 
     cancelToken.cancel()
   }
 
   it should "skip the duration and create and approved block immediately if the required signatures is zero" in {
-    val d: FiniteDuration = 30.milliseconds
-    implicit val time     = new LogicalTime[Task]()
-    implicit val ctx      = TestScheduler()
+    val d: FiniteDuration     = 30.milliseconds
+    implicit val time         = new LogicalTime[Task]()
+    implicit val ctx          = TestScheduler()
+    implicit val lastApproved = LastApprovedBlock.of[Task].unsafeRunSync
     implicit val abp =
-      ApproveBlockProtocolTest.createProtocol(0, duration = d, interval = 1.millisecond)
+      ApproveBlockProtocolTest.createProtocol(requiredSigs = 0,
+                                              duration = d,
+                                              interval = 1.millisecond)
 
     val startTime = abp.start
     ctx.tick(startTime.milliseconds) // align clocks
@@ -141,18 +165,19 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
     val cancelToken = abp.run().fork.runAsync
     ctx.tick()
 
-    abp.approvedBlock.runAsync.value.nonEmpty should be(true)
-    abp.approvedBlock.runAsync.value.get shouldBe 'success
+    lastApproved.get.runAsync.value.nonEmpty should be(true)
+    lastApproved.get.runAsync.value.get should be('success)
 
     cancelToken.cancel()
   }
 }
 
 object ApproveBlockProtocolTest {
+  val (sk, pk) = Ed25519.newKeyPair
+
   def approval(c: ApprovedBlockCandidate): BlockApproval = {
-    val (sk, pk) = Ed25519.newKeyPair
-    val sigData  = Blake2b256.hash(c.toByteArray)
-    val sig      = Ed25519.sign(sigData, sk)
+    val sigData = Blake2b256.hash(c.toByteArray)
+    val sig     = Ed25519.sign(sigData, sk)
     BlockApproval(Some(c),
                   Some(Signature(ByteString.copyFrom(pk), "ed25519", ByteString.copyFrom(sig))))
   }
@@ -166,7 +191,8 @@ object ApproveBlockProtocolTest {
   }
 
   def createProtocol(requiredSigs: Int, duration: FiniteDuration, interval: FiniteDuration)(
-      implicit time: Time[Task]): ApproveBlockProtocol[Task] = {
+      implicit time: Time[Task],
+      lastApproved: LastApprovedBlock[Task]): ApproveBlockProtocol[Task] = {
     implicit val nodeDiscovery  = new NodeDiscoveryStub[Task]()
     implicit val nopLog         = new NOPLog[Task]()
     val src: PeerNode           = peerNode("src", 40400)
@@ -177,8 +203,12 @@ object ApproveBlockProtocolTest {
     val (sk, pk) = Ed25519.newKeyPair
     val genesis  = HashSetCasperTest.createGenesis(Seq(pk))
 
+    val validators = Set(ByteString.copyFrom(pk))
+
     val node = HashSetCasperTestNode.standalone(genesis, sk)
-    ApproveBlockProtocol.create[Task](genesis, requiredSigs, duration, interval).unsafeRunSync
+    ApproveBlockProtocol
+      .create[Task](genesis, validators, requiredSigs, duration, interval)
+      .unsafeRunSync
   }
 
   private def endpoint(port: Int): Endpoint = Endpoint("host", port, port)
