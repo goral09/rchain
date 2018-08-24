@@ -102,6 +102,10 @@ object errors {
       s"Error: Operator `$op` expected $expected but got $otherType."
   }
 
+  case object OutOfPhloError extends InterpreterError {
+    override def toString: String = "Computation run out of phlogistons."
+  }
+
   implicit val monadErrorTask: MonadError[Task, InterpreterError] =
     new MonadError[Task, InterpreterError] {
       override def raiseError[A](e: InterpreterError): Task[A] = Task.raiseError(e)
