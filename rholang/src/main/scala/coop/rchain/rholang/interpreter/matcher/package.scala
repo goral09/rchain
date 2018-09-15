@@ -16,7 +16,9 @@ package object matcher {
   type FreeMap = Map[Int, Par]
 
   type OptionalFreeMapWithCost[A] =
-    StateT[OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?], FreeMap, A]
+    StateT[OptionWithCost, FreeMap, A]
+  type OptionWithCost[A]          = OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], A]
+
 
   object OptionalFreeMapWithCost {
 
@@ -35,17 +37,17 @@ package object matcher {
           }))
         })
 
-      def attempt: OptionalFreeMapWithCost[Either[Unit, A]] =
+      def attemptOpt: OptionalFreeMapWithCost[Option[A]] =
         StateT((m: FreeMap) => {
           OptionT(StateT((c: CostAccount) => {
-            s.run(m).value.run(c).map {
-              case (cost: CostAccount, result: Option[(FreeMap, A)]) =>
-                val recovered: Option[(FreeMap, Either[Unit, A])] = result match {
-                  case None          => Some((m, Left(())))
-                  case Some((m1, a)) => Some((m1, Right(a)))
-                }
-                (cost, recovered)
+            val (cost: CostAccount, result: Option[(FreeMap, A)]) = s.run(m).value.run(c).value
+
+            val recovered: Option[(FreeMap, Option[A])] = result match {
+              case None          => Some((m, None))
+              case Some((m1, a)) => Some((m1, Some(a)))
             }
+
+            (cost, recovered)
           }))
         })
 
@@ -54,22 +56,16 @@ package object matcher {
         s.run(Map.empty).value.run(initCost)
 
       def toNonDet(): NonDetFreeMapWithCost[A] =
-        s.mapK[StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?]](
-          new FunctionK[OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?],
-                        StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?]] {
-            override def apply[AA](
-                fa: OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], AA])
-              : StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], AA] =
-              StreamT(fa.fold(Stream.empty[AA])(single => Stream(single)))
-          })
+        s.mapK[StreamWithCost](new FunctionK[OptionWithCost, StreamWithCost] {
+          override def apply[T](fa: OptionWithCost[T]): StreamWithCost[T] =
+            StreamT(fa.fold(Stream.empty[T])(single => Stream(single)))
+        })
     }
 
     implicit def toOptionalFreeMapWithCostOps[A](s: OptionalFreeMapWithCost[A]) =
       new OptionalFreeMapWithCostOps[A](s)
 
-    def apply[A](
-        f: FreeMap => OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?],
-                              (FreeMap, A)]): OptionalFreeMapWithCost[A] =
+    def apply[A](f: FreeMap => OptionWithCost[(FreeMap, A)]): OptionalFreeMapWithCost[A] =
       StateT((m: FreeMap) => {
         f(m)
       })
@@ -100,8 +96,8 @@ package object matcher {
       })
   }
 
-  type NonDetFreeMapWithCost[A] =
-    StateT[StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?], FreeMap, A]
+  type NonDetFreeMapWithCost[A] = StateT[StreamWithCost, FreeMap, A]
+  type StreamWithCost[A]        = StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], A]
 
   object NonDetFreeMapWithCost {
     class NonDetFreeMapWithCostOps[A](s: NonDetFreeMapWithCost[A]) {
@@ -124,22 +120,16 @@ package object matcher {
         s.run(Map.empty).value.run(initCost)
 
       def toDet(): OptionalFreeMapWithCost[A] =
-        s.mapK[OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?]](
-          new FunctionK[StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?],
-                        OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], ?]] {
-            override def apply[AA](
-                fa: StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], AA])
-              : OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], AA] =
-              OptionT(fa.value.map(_.headOption))
-          })
+        s.mapK[OptionWithCost](new FunctionK[StreamWithCost, OptionWithCost] {
+          override def apply[T](fa: StreamWithCost[T]): OptionWithCost[T] =
+            OptionT(fa.value.map(_.headOption))
+        })
     }
 
     implicit def toNonDetFreeMapWithCostOps[A](s: NonDetFreeMapWithCost[A]) =
       new NonDetFreeMapWithCostOps[A](s)
 
-    def apply[A](
-        f: FreeMap => StreamT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?],
-                              (FreeMap, A)]): NonDetFreeMapWithCost[A] =
+    def apply[A](f: FreeMap => StreamWithCost[(FreeMap, A)]): NonDetFreeMapWithCost[A] =
       StateT((m: FreeMap) => f(m))
 
     def emptyMap[A]: NonDetFreeMapWithCost[A] =

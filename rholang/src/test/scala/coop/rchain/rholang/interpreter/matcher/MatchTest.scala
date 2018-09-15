@@ -13,6 +13,7 @@ import coop.rchain.rholang.interpreter.PrettyPrinter
 import coop.rchain.rholang.interpreter.accounting.{Cost, CostAccount}
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
 import coop.rchain.rholang.interpreter.matcher.OptionalFreeMapWithCost.toOptionalFreeMapWithCostOps
+import monix.eval.Coeval
 import org.scalatest._
 import org.scalatest.concurrent.TimeLimits
 import scalapb.GeneratedMessage
@@ -68,7 +69,7 @@ class VarMatcherSpec extends FlatSpec with Matchers with TimeLimits {
 
   private def assertSorted[T <: GeneratedMessage](term: T, termName: String)(
       implicit ts: Sortable[T]): Assertion = {
-    val sortedTerm = Sortable[T].sortMatch(term).term
+    val sortedTerm = Sortable[T].sortMatch[Coeval](term).value.term
     val clue       = s"Invalid test case - ${termName} is not sorted"
     assert(printer.buildString(term) == printer.buildString(sortedTerm), clue)
     assert(term == sortedTerm, clue)
