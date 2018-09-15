@@ -36,9 +36,7 @@ class CryptoChannelsSpec
     with TripleEqualsSupport {
   behavior of "Crypto channels"
 
-  implicit val rand: Blake2b512Random = Blake2b512Random(Array.empty[Byte])
-  implicit val costAccountingAlg: CostAccountingAlg[Task] =
-    CostAccountingAlg.unsafe[Task](CostAccount.zero)
+  implicit val rand: Blake2b512Random               = Blake2b512Random(Array.empty[Byte])
   implicit val serializeChannel: Serialize[Channel] = storage.implicits.serializeChannel
   implicit val serializeChannels: Serialize[ListChannelWithRandom] =
     storage.implicits.serializeChannels
@@ -52,7 +50,7 @@ class CryptoChannelsSpec
 
   // this should consume from the `ack` channel effectively preparing tuplespace for next test
   def clearStore(store: RhoIStore,
-                 reduce: Reduce[Task],
+                 reduce: Reducer[Task],
                  ackChannel: Par,
                  timeout: Duration = 3.seconds)(implicit env: Env[Par]): Unit = {
     val consume = Receive(
@@ -62,10 +60,8 @@ class CryptoChannelsSpec
     Await.ready(reduce.eval(consume).runAsync, 3.seconds)
   }
 
-  def assertStoreContains(store: RhoIStore)(ackChannel: GString)(data: ListChannelWithRandom)(
-      implicit
-      serializeChannel: Serialize[Channel],
-      serializeChannels: Serialize[ListChannelWithRandom]): Assertion = {
+  def assertStoreContains(store: RhoIStore)(ackChannel: GString)(
+      data: ListChannelWithRandom): Assertion = {
     val channel = Channel(Quote(ackChannel))
     store.toMap(List(channel)) should be(
       Row(
@@ -221,6 +217,6 @@ class CryptoChannelsSpec
   /** TODO(mateusz.gorski): once we refactor Rholang[AndScala]Dispatcher
     *  to push effect choice up until declaration site refactor to `Reduce[Coeval]`
     */
-  override type FixtureParam = (Reduce[Task], RhoIStore)
+  override type FixtureParam = (Reducer[Task], RhoIStore)
 
 }

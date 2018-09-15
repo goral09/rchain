@@ -1,21 +1,19 @@
 package coop.rchain.rholang.interpreter.accounting
 
-import coop.rchain.shared.NumericOps
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
-//TODO(mateusz.gorski): Adjust the costs of operations
-final case class Cost(value: BigInt) extends AnyVal {
-  def *(other: Cost): Cost = Cost(value * other.value)
-  def *(other: Int): Cost  = Cost(value * other)
+final case class Cost(value: Long) extends AnyVal {
+  def *(base: Int): Cost   = Cost(base * value)
   def +(other: Cost): Cost = Cost(value + other.value)
   def -(other: Cost): Cost = Cost(value - other.value)
 }
 
 object Cost {
-  implicit val costNumeric: Numeric[Cost] =
-    NumericOps.by[Cost, BigInt](_.value, Cost(_))
+  // to remove "implicit numeric widening" warnings
+  def apply(i: Int): Cost = Cost(i.toLong)
 }
 
+//TODO(mateusz.gorski): Adjust the costs of operations
 trait Costs {
 
   final val SUM_COST: Cost         = Cost(3)
@@ -48,8 +46,7 @@ trait Costs {
   // serializing any Par into a Array[Byte]:
   // + allocates byte array of the same size as `serializedSize`
   // + then it copies all elements of the Par
-  def toByteArrayCost[T <: GeneratedMessage with Message[T]](a: T)(
-      implicit comp: GeneratedMessageCompanion[T]): Cost =
+  def toByteArrayCost[T <: GeneratedMessage with Message[T]](a: T): Cost =
     Cost(a.serializedSize)
 
   //TODO(mateusz.gorski): adjust the cost of the nth method call.
@@ -66,7 +63,7 @@ trait Costs {
   // on the # of bindings and constant cost of evaluating `new … in  { … }` construct
   final val NEW_BINDING_COST  = Cost(2)
   final val NEW_EVAL_COST     = Cost(10)
-  def newBindingsCost(n: Int) = Cost(n) * NEW_BINDING_COST + NEW_EVAL_COST
+  def newBindingsCost(n: Int) = (NEW_BINDING_COST * n) + NEW_EVAL_COST
 
   final val MATCH_EVAL_COST = Cost(12)
 

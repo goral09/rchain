@@ -10,8 +10,8 @@ import coop.rchain.models.Var.WildcardMsg
 import coop.rchain.models._
 import coop.rchain.models.rholang.sort.Sortable
 import coop.rchain.rholang.interpreter.PrettyPrinter
-import coop.rchain.rholang.interpreter.accounting.CostAccount
-import coop.rchain.rholang.interpreter.errors.OutOfPhloError
+import coop.rchain.rholang.interpreter.accounting.{Cost, CostAccount}
+import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
 import coop.rchain.rholang.interpreter.matcher.OptionalFreeMapWithCost.toOptionalFreeMapWithCostOps
 import org.scalatest._
 import org.scalatest.concurrent.TimeLimits
@@ -36,7 +36,7 @@ class VarMatcherSpec extends FlatSpec with Matchers with TimeLimits {
     assertSorted(pattern, "pattern")
     expectedCaptures.foreach(
       _.values.foreach((v: Par) => assertSorted(v, "expected captured term")))
-    val intermediateResult = spatialMatch(target, pattern).runWithCost(CostAccount.MAX_VALUE)
+    val intermediateResult = spatialMatch(target, pattern).runWithCost(CostAccount.zero)
     assert(intermediateResult.isRight)
     val result: Option[FreeMap] = intermediateResult.right.get._2.map(_._1)
     assert(prettyCaptures(result) == prettyCaptures(expectedCaptures))
@@ -836,7 +836,7 @@ class VarMatcherSpec extends FlatSpec with Matchers with TimeLimits {
     val target: Par = EList(Seq(GInt(1), GInt(2), GInt(3)))
     val pattern: Par = EList(Seq(GInt(1), EVar(FreeVar(0)), EVar(FreeVar(1))), connectiveUsed = true)
 
-    val res = spatialMatch(target, pattern).runWithCost(CostAccount.zero)
-    res should be(Left(OutOfPhloError()))
+    val res = spatialMatch(target, pattern).runWithCost(CostAccount(0, Cost(0)))
+    res should be(Left(OutOfPhlogistonsError))
   }
 }

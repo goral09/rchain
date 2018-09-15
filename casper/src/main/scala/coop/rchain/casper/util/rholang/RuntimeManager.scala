@@ -2,31 +2,28 @@ package coop.rchain.casper.util.rholang
 
 import cats.implicits._
 import com.google.protobuf.ByteString
-import coop.rchain.casper.util.ProtoUtil
-import coop.rchain.casper.PrettyPrinter.buildString
 import coop.rchain.casper.protocol._
+import coop.rchain.casper.util.ProtoUtil
+import coop.rchain.casper.util.rholang.RuntimeManager.StateHash
 import coop.rchain.catscontrib.TaskContrib._
-import coop.rchain.crypto.hash.Blake2b512Random
-import coop.rchain.models._
-import coop.rchain.rholang.interpreter.{ErrorLog, Reduce, Runtime}
-import coop.rchain.rholang.interpreter.errors.InterpreterError
-import coop.rchain.rholang.interpreter.storage.StoragePrinter
-import coop.rchain.rspace.{trace, Blake2b256Hash, Checkpoint, ReplayException}
-import monix.execution.Scheduler
-import coop.rchain.rspace.internal.WaitingContinuation
-
-import scala.concurrent.SyncVar
-import scala.util.{Failure, Success, Try}
-import RuntimeManager.StateHash
 import coop.rchain.crypto.codec.Base16
+import coop.rchain.crypto.hash.Blake2b512Random
 import coop.rchain.models.Channel.ChannelInstance.Quote
-import coop.rchain.models.Expr.ExprInstance.{GInt, GString}
+import coop.rchain.models.Expr.ExprInstance.GString
+import coop.rchain.models._
 import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
-import coop.rchain.rspace.internal.Datum
+import coop.rchain.rholang.interpreter.storage.StoragePrinter
+import coop.rchain.rholang.interpreter.{ChargingReducer, ErrorLog, Reducer, Runtime}
+import coop.rchain.rspace.internal.{Datum, WaitingContinuation}
 import coop.rchain.rspace.trace.Produce
+import coop.rchain.rspace.{Blake2b256Hash, ReplayException}
 import monix.eval.Task
+import monix.execution.Scheduler
 
 import scala.collection.immutable
+import scala.concurrent.duration._
+import scala.concurrent.{Await, SyncVar}
+import scala.util.{Failure, Success, Try}
 
 //runtime is a SyncVar for thread-safety, as all checkpoints share the same "hot store"
 class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: SyncVar[Runtime]) {
@@ -145,9 +142,11 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
       terms match {
         case deploy +: rem =>
           runtime.space.reset(hash)
-          implicit val costAccountingAlg = CostAccountingAlg.unsafe[Task](CostAccount.zero)
-          val (cost, errors)             = injAttempt(deploy, runtime.reducer, runtime.errorLog)
-          val newCheckpoint              = runtime.space.createCheckpoint()
+          Await.ready(
+            runtime.reducer.setAvailablePhlos(CostAccount(deploy.raw.get.phloLimit)).runAsync,
+            1.second) //FIXME
+          val (cost, errors) = injAttempt(deploy, runtime.reducer, runtime.errorLog)
+          val newCheckpoint  = runtime.space.createCheckpoint()
           val deployResult = InternalProcessedDeploy(deploy,
                                                      cost,
                                                      newCheckpoint.log,
@@ -170,10 +169,9 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
                      hash: Blake2b256Hash): Either[(Option[Deploy], Failed), StateHash] =
       terms match {
         case InternalProcessedDeploy(deploy, _, log, status) +: rem =>
-          implicit val costAccountingAlg = CostAccountingAlg.unsafe[Task](CostAccount.zero)
           runtime.replaySpace.rig(hash, log.toList)
           //TODO: compare replay deploy cost to given deploy cost
-          val (_, errors) = injAttempt(deploy, runtime.replayReducer, runtime.errorLog)
+          val (replayCost, errors) = injAttempt(deploy, runtime.replayReducer, runtime.errorLog)
           DeployStatus.fromErrors(errors) match {
             case int: InternalErrors => Left(Some(deploy) -> int)
             case replayStatus =>
@@ -196,21 +194,22 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
     doReplayEval(terms, Blake2b256Hash.fromByteArray(initHash.toByteArray))
   }
 
-  private def injAttempt(deploy: Deploy, reducer: Reduce[Task], errorLog: ErrorLog)(
-      implicit scheduler: Scheduler,
-      costAlg: CostAccountingAlg[Task]): (PCost, Vector[Throwable]) = {
+  private def injAttempt(deploy: Deploy, reducer: ChargingReducer[Task], errorLog: ErrorLog)(
+      implicit scheduler: Scheduler): (PCost, Vector[Throwable]) = {
     implicit val rand: Blake2b512Random = Blake2b512Random(
       DeployData.toByteArray(ProtoUtil.stripDeployData(deploy.raw.get)))
     Try(reducer.inj(deploy.term.get).unsafeRunSync) match {
       case Success(_) =>
-        val errors = errorLog.readAndClearErrorVector()
-        val cost   = CostAccount.toProto(costAlg.getCost().unsafeRunSync)
+        val errors   = errorLog.readAndClearErrorVector()
+        val phloLeft = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
+        val cost     = CostAccount.toProto(phloLeft)
         cost -> errors
 
       case Failure(ex) =>
         val otherErrors = errorLog.readAndClearErrorVector()
         val errors      = otherErrors :+ ex
-        val cost        = CostAccount.toProto(costAlg.getCost().unsafeRunSync)
+        val phloLeft    = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
+        val cost        = CostAccount.toProto(phloLeft)
         cost -> errors
     }
   }

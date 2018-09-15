@@ -1,25 +1,33 @@
 package coop.rchain.rholang.interpreter.accounting
 
-import cats.Monad
+import cats.{FlatMap, Monad}
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
 import coop.rchain.rholang.interpreter.accounting
 import cats.implicits._
+import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
 
 trait CostAccountingAlg[F[_]] {
   def charge(cost: Cost): F[Unit]
-  def modify(f: CostAccount => CostAccount): F[Unit]
-  def getCost(): F[CostAccount]
-  def setCost(cost: CostAccount): F[Unit]
+  def get(): F[CostAccount]
+  def set(cost: CostAccount): F[Unit]
 }
 
 object CostAccountingAlg {
   def apply[F[_]: Sync](init: CostAccount): F[CostAccountingAlg[F]] = Ref[F].of(init).map { state =>
     new CostAccountingAlg[F] {
-      override def charge(cost: Cost): F[Unit]                    = state.update(_.charge(cost))
-      override def modify(f: CostAccount => CostAccount): F[Unit] = state.update(f)
-      override def getCost: F[CostAccount]                        = state.get
-      override def setCost(cost: CostAccount): F[Unit]            = state.set(cost)
+      override def charge(cost: Cost): F[Unit] =
+        for {
+          _ <- failOnOutOfPhlo
+          _ <- state.update(_ - cost)
+          _ <- failOnOutOfPhlo
+        } yield ()
+      override def get: F[CostAccount]             = state.get
+      override def set(cost: CostAccount): F[Unit] = state.set(cost)
+
+      private val failOnOutOfPhlo: F[Unit] =
+        FlatMap[F].ifM(state.get.map(_.cost.value < 0))(Sync[F].raiseError(OutOfPhlogistonsError),
+                                                        Sync[F].unit)
     }
   }
 
@@ -29,16 +37,13 @@ object CostAccountingAlg {
     val state = Ref.unsafe[F, CostAccount](initialState)
     new CostAccountingAlg[F] {
 
-      override def modify(f: CostAccount => CostAccount): F[Unit] =
-        F.suspend(state.update(f))
-
-      override def setCost(cost: CostAccount): F[Unit] =
-        F.suspend(state.set(cost))
+      override def set(cost: CostAccount): F[Unit] =
+        state.set(cost)
 
       override def charge(cost: accounting.Cost): F[Unit] =
-        F.suspend(state.update(_ + cost))
+        state.update(_ - cost)
 
-      override def getCost(): F[CostAccount] = F.suspend(state.get)
+      override def get(): F[CostAccount] = state.get
     }
   }
 }

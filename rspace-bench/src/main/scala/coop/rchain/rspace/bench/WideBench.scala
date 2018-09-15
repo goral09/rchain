@@ -41,11 +41,10 @@ object WideBench {
     private lazy val dbDir: Path      = Files.createTempDirectory("rchain-storage-test-")
     private val mapSize: Long         = 1024 * 1024 * 1024
 
-    lazy val runtime: Runtime                   = Runtime.create(dbDir, mapSize)
-    def rand: Blake2b512Random                  = Blake2b512Random(128)
-    val costAccountAlg: CostAccountingAlg[Task] = CostAccountingAlg.unsafe[Task](CostAccount.zero)
-    var setupTerm: Option[Par]                  = None
-    var term: Option[Par]                       = None
+    lazy val runtime: Runtime  = Runtime.create(dbDir, mapSize)
+    def rand: Blake2b512Random = Blake2b512Random(128)
+    var setupTerm: Option[Par] = None
+    var term: Option[Par]      = None
 
     @Setup(value = Level.Iteration)
     def doSetup(): Unit = {
@@ -88,7 +87,7 @@ object WideEvalBenchState {
   def createTest(t: Option[Par], state: WideBenchState): Task[Vector[Throwable]] = {
     val par = t.getOrElse(throw new Error("Failed to prepare executable rholang term"))
     state.runtime.reducer
-      .inj(par)(state.rand, state.costAccountAlg)
+      .inj(par)(state.rand)
       .map(_ => state.runtime.readAndClearErrorVector())
   }
 

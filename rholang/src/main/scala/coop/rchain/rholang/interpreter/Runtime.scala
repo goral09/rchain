@@ -11,18 +11,21 @@ import coop.rchain.models.Var.VarInstance.FreeVar
 import coop.rchain.models._
 import coop.rchain.models.rholang.implicits._
 import coop.rchain.rholang.interpreter.Runtime._
+import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
+import coop.rchain.rholang.interpreter.storage.TuplespaceAlg
 import coop.rchain.rholang.interpreter.storage.implicits._
 import coop.rchain.rspace._
 import coop.rchain.rspace.history.Branch
+import coop.rchain.rspace.pure.PureRSpace
 import coop.rchain.shared.StoreType
 import coop.rchain.shared.StoreType._
 import monix.eval.Task
 
 import scala.collection.immutable
 
-class Runtime private (val reducer: Reduce[Task],
-                       val replayReducer: Reduce[Task],
+class Runtime private (val reducer: ChargingReducer[Task],
+                       val replayReducer: ChargingReducer[Task],
                        val space: RhoISpace,
                        val replaySpace: RhoReplayRSpace,
                        var errorLog: ErrorLog,
@@ -44,10 +47,10 @@ object Runtime {
   type RhoIStore  = CPAK[IStore]
   type RhoContext = CPAK[Context]
 
-  private type CPAK[F[_, _, _, _]] =
+  type CPAK[F[_, _, _, _]] =
     F[Channel, BindPattern, ListChannelWithRandom, TaggedContinuation]
 
-  private type CPARK[F[_, _, _, _, _, _]] =
+  type CPARK[F[_, _, _, _, _, _]] =
     F[Channel,
       BindPattern,
       OutOfPhlogistonsError.type,
@@ -121,17 +124,30 @@ object Runtime {
                                        "rho:io:stderr"    -> byteName(2),
                                        "rho:io:stderrAck" -> byteName(3))
 
-    lazy val dispatchTable: Map[Ref, Seq[ListChannelWithRandom] => Task[Unit]] =
-      dispatchTableCreator(space, dispatcher)
-
+    // replay
+    lazy val replayPureSpace = PureRSpace[Task].of(replaySpace)
     lazy val replayDispatchTable: Map[Ref, Seq[ListChannelWithRandom] => Task[Unit]] =
       dispatchTableCreator(replaySpace, replayDispatcher)
-
-    lazy val dispatcher: Dispatch[Task, ListChannelWithRandom, TaggedContinuation] =
-      RholangAndScalaDispatcher.create(space, dispatchTable, urnMap)
-
+    lazy val replayTuplespaceAlg =
+      TuplespaceAlg.rspaceTuplespace[Task, Task.Par](replayPureSpace, replayDispatcher)
+    lazy val replayCostAccounting = CostAccountingAlg.unsafe[Task](CostAccount.zero)
+    lazy val replayReducer: ChargingReducer[Task] =
+      new Reducer.DebruijnInterpreter[Task, Task.Par](replayTuplespaceAlg,
+                                                      replayCostAccounting,
+                                                      urnMap)
     lazy val replayDispatcher: Dispatch[Task, ListChannelWithRandom, TaggedContinuation] =
-      RholangAndScalaDispatcher.create(replaySpace, replayDispatchTable, urnMap)
+      RholangAndScalaDispatcher.create(replayReducer, replayDispatchTable)
+
+    // pure
+    lazy val pureSpace = PureRSpace[Task].of(space)
+    lazy val dispatchTable: Map[Ref, Seq[ListChannelWithRandom] => Task[Unit]] =
+      dispatchTableCreator(space, dispatcher)
+    lazy val tuplespaceAlg  = TuplespaceAlg.rspaceTuplespace[Task, Task.Par](pureSpace, dispatcher)
+    lazy val costAccounting = CostAccountingAlg.unsafe[Task](CostAccount.zero)
+    lazy val reducer: ChargingReducer[Task] =
+      new Reducer.DebruijnInterpreter[Task, Task.Par](tuplespaceAlg, costAccounting, urnMap)
+    lazy val dispatcher: Dispatch[Task, ListChannelWithRandom, TaggedContinuation] =
+      RholangAndScalaDispatcher.create(reducer, dispatchTable)
 
     val procDefs: immutable.Seq[(Name, Arity, Remainder, Ref)] = List(
       (byteName(0), 1, None, 0L),
@@ -150,6 +166,6 @@ object Runtime {
 
     assert(res.forall(_.isEmpty))
 
-    new Runtime(dispatcher.reducer, replayDispatcher.reducer, space, replaySpace, errorLog, context)
+    new Runtime(reducer, replayReducer, space, replaySpace, errorLog, context)
   }
 }

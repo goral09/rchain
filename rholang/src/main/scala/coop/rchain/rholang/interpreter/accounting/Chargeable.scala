@@ -8,10 +8,11 @@ trait Chargeable[A] {
   def cost(a: A): Int
 }
 
+//noinspection ConvertExpressionToSAM
 object Chargeable {
   def apply[T](implicit ev: Chargeable[T]): Chargeable[T] = ev
 
-  implicit def fromProtobuf[T <: GeneratedMessage with Message[T]] =
+  implicit def fromProtobuf[T <: GeneratedMessage with Message[T]]: Chargeable[T] =
     new Chargeable[T] {
       override def cost(a: T): Int = a.serializedSize
     }

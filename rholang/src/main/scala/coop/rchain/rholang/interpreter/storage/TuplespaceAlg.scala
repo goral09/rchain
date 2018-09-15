@@ -40,12 +40,15 @@ object TuplespaceAlg {
           res: Either[OutOfPhlogistonsError.type,
                       Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]): F[CostAccount] =
         res match {
+          case Left(OutOfPhlogistonsError) =>
+            ???
           case Right(Some((continuation, dataList))) =>
             val rspaceMatchCost =
               dataList
-                .map(_.cost.map(CostAccount.fromProto(_)).getOrElse(CostAccount.zero))
+                .map(_.cost.map(CostAccount.fromProto(_)).get)
                 .toList
                 .combineAll
+            println(s"rspaceMatchCost $rspaceMatchCost")
             if (persistent) {
               List(dispatcher.dispatch(continuation, dataList) *> F.pure(CostAccount.zero),
                    produce(channel, data, persistent)).parSequence
@@ -75,6 +78,8 @@ object TuplespaceAlg {
                           Option[(TaggedContinuation, Seq[ListChannelWithRandom])]])
             : F[CostAccount] =
             res match {
+              case Left(OutOfPhlogistonsError) =>
+                ???
               case Right(Some((continuation, dataList))) =>
                 val rspaceMatchCost =
                   dataList
