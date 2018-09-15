@@ -255,7 +255,7 @@ object Reducer {
 
         data <- send.data.toList.traverse(x => evalExpr(x))
         substData <- data.traverse(p =>
-                      substituteAndCharge[Par, M](p, 0, env, costAccountingAlg).map(par =>
+                      substituteAndCharge[Par, M](p, 0, env, costAccounting).map(par =>
                         Channel(Quote(par))))
         _ <- produce(unbundled, substData, send.persistent, rand)
         _ <- costAccounting.charge(SEND_EVAL_COST)
@@ -369,7 +369,7 @@ object Reducer {
             case Nil => Applicative[M].pure(Right(()))
             case singleCase +: caseRem =>
               for {
-              //TODO: look at me!
+                //TODO: look at me!
                 pattern  <- substituteAndCharge[Par, M](singleCase.pattern, 1, env, costAccounting)
                 phloLeft <- costAccounting.get()
                 result <- Sync[M].fromEither(
@@ -621,7 +621,7 @@ object Reducer {
 
         case EMatchesBody(EMatches(target, pattern)) =>
           for {
-          //TODO: look at me!
+            //TODO: look at me!
             evaledTarget <- evalExpr(target)
             substTarget  <- substituteAndCharge[Par, M](evaledTarget, 0, env, costAccounting)
             substPattern <- substituteAndCharge[Par, M](pattern, 1, env, costAccounting)

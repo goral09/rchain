@@ -17,8 +17,7 @@ package object matcher {
 
   type OptionalFreeMapWithCost[A] =
     StateT[OptionWithCost, FreeMap, A]
-  type OptionWithCost[A]          = OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], A]
-
+  type OptionWithCost[A] = OptionT[StateT[Either[OutOfPhlogistonsError.type, ?], CostAccount, ?], A]
 
   object OptionalFreeMapWithCost {
 
@@ -40,14 +39,15 @@ package object matcher {
       def attemptOpt: OptionalFreeMapWithCost[Option[A]] =
         StateT((m: FreeMap) => {
           OptionT(StateT((c: CostAccount) => {
-            val (cost: CostAccount, result: Option[(FreeMap, A)]) = s.run(m).value.run(c).value
+            s.run(m).value.run(c).map {
+              case (cost, result) =>
+                val recovered: Option[(FreeMap, Option[A])] = result match {
+                  case None          => Some((m, None))
+                  case Some((m1, a)) => Some((m1, Some(a)))
+                }
 
-            val recovered: Option[(FreeMap, Option[A])] = result match {
-              case None          => Some((m, None))
-              case Some((m1, a)) => Some((m1, Some(a)))
+                (cost, recovered)
             }
-
-            (cost, recovered)
           }))
         })
 

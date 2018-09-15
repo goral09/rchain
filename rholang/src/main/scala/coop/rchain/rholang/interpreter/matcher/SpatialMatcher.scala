@@ -364,10 +364,9 @@ object SpatialMatcher extends SpatialMatcherInstances {
       updatedFreeMap = freeMaps.fold(currentFreeMap)(_ ++ _)
     } yield updatedFreeMap
 
-  private def handleRemainder[T](
-      remainderTargets: Seq[T],
-      level: Int,
-      merger: (Par, Seq[T]) => Par)(implicit lf: HasLocallyFree[T]): OptionalFreeMapWithCost[Unit] =
+  private def handleRemainder[T](remainderTargets: Seq[T],
+                                 level: Int,
+                                 merger: (Par, Seq[T]) => Par): OptionalFreeMapWithCost[Unit] =
     for {
       remainderPar <- StateT.inspect[OptionWithCost, FreeMap, Par]((m: FreeMap) =>
                        m.getOrElse(level, VectorPar()))
