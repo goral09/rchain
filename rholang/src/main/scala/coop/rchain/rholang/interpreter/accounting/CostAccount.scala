@@ -23,6 +23,6 @@ object CostAccount {
   implicit val monoidCostAccount: Monoid[CostAccount] = new Monoid[CostAccount] {
     override def empty: CostAccount = CostAccount(0)
 
-    override def combine(x: CostAccount, y: CostAccount): CostAccount = x.charge(y)
+    override def combine(x: CostAccount, y: CostAccount): CostAccount = x + y
   }
 }
