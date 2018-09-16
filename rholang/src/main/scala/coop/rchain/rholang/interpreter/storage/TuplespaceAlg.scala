@@ -2,16 +2,15 @@ package coop.rchain.rholang.interpreter.storage
 
 import cats.Parallel
 import cats.effect.Sync
-import coop.rchain.models.Channel.ChannelInstance.Quote
-import coop.rchain.models._
-import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
-import coop.rchain.rholang.interpreter.Dispatch
-import coop.rchain.rholang.interpreter.errors.{OutOfPhlogistonsError, ReduceError}
-import coop.rchain.rspace.pure.PureRSpace
 import cats.implicits._
-import coop.rchain.models.rholang.implicits._
+import coop.rchain.models.Channel.ChannelInstance.Quote
+import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
+import coop.rchain.models._
+import coop.rchain.rholang.interpreter.Dispatch
 import coop.rchain.rholang.interpreter.accounting.CostAccount
+import coop.rchain.rholang.interpreter.errors.{OutOfPhlogistonsError, ReduceError}
 import coop.rchain.rholang.interpreter.storage.implicits._
+import coop.rchain.rspace.pure.PureRSpace
 
 trait TuplespaceAlg[F[_]] {
   def produce(chan: Channel, data: ListChannelWithRandom, persistent: Boolean): F[CostAccount]
@@ -48,16 +47,16 @@ object TuplespaceAlg {
                 .map(_.cost.map(CostAccount.fromProto(_)).get)
                 .toList
                 .combineAll
-            println(s"rspaceMatchCost $rspaceMatchCost")
             if (persistent) {
-              List(dispatcher.dispatch(continuation, dataList) *> F.pure(CostAccount.zero),
+              List(dispatcher.dispatch(continuation, dataList) *> F.pure(
+                     CostAccount(Integer.MAX_VALUE)),
                    produce(channel, data, persistent)).parSequence
                 .map(_.combineAll + rspaceMatchCost)
             } else {
               dispatcher.dispatch(continuation, dataList) *> rspaceMatchCost.pure[F]
             }
 
-          case Right(None) => F.pure(CostAccount.zero)
+          case Right(None) => F.pure(CostAccount(Integer.MAX_VALUE))
         }
 
       for {
@@ -83,19 +82,23 @@ object TuplespaceAlg {
               case Right(Some((continuation, dataList))) =>
                 val rspaceMatchCost =
                   dataList
-                    .map(_.cost.map(CostAccount.fromProto(_)).getOrElse(CostAccount.zero))
+                    .map(
+                      _.cost
+                        .map(CostAccount.fromProto(_))
+                        .getOrElse(CostAccount(Integer.MAX_VALUE)))
                     .toList
                     .combineAll
 
                 dispatcher.dispatch(continuation, dataList)
                 if (persistent) {
-                  List(dispatcher.dispatch(continuation, dataList) *> F.pure(CostAccount.zero),
+                  List(dispatcher.dispatch(continuation, dataList) *> F.pure(
+                         CostAccount(Integer.MAX_VALUE)),
                        consume(binds, body, persistent)).parSequence
                     .map(_.combineAll + rspaceMatchCost)
                 } else {
                   dispatcher.dispatch(continuation, dataList) *> rspaceMatchCost.pure[F]
                 }
-              case Right(None) => F.pure(CostAccount.zero)
+              case Right(None) => F.pure(CostAccount(Integer.MAX_VALUE))
             }
 
           for {
