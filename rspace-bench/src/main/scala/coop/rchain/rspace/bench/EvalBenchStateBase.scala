@@ -38,8 +38,8 @@ trait EvalBenchStateBase {
     import monix.execution.Scheduler.Implicits.global
     Await.ready(
       Task
-        .zip2(runtime.reducer.setAvailablePhlos(CostAccount(Integer.MAX_VALUE)),
-              runtime.replayReducer.setAvailablePhlos(CostAccount(Integer.MAX_VALUE)))
+        .parZip2(runtime.reducer.setAvailablePhlos(CostAccount(Integer.MAX_VALUE)),
+                 runtime.replayReducer.setAvailablePhlos(CostAccount(Integer.MAX_VALUE)))
         .runAsync,
       1.second
     )

@@ -40,7 +40,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
       ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond, Set(validatorPk))
     val a = ApproveBlockProtocolTest.approval(candidate, validatorSk, validatorPk)
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
     sigsF.get.unsafeRunSync.size should be(0)
     metricsTest.counters.get(ApproveBlockProtocol.METRICS_APPROVAL_COUNTER_NAME) should be(None)
     abp.addApproval(a).unsafeRunSync
@@ -60,7 +60,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
       ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond, Set(validatorPk))
     val a = ApproveBlockProtocolTest.approval(candidate, validatorSk, validatorPk)
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
     sigsF.get.unsafeRunSync.size should be(0)
     metricsTest.counters.get(ApproveBlockProtocol.METRICS_APPROVAL_COUNTER_NAME) should be(None)
     abp.addApproval(a).unsafeRunSync
@@ -84,7 +84,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
       ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond, Set(validatorSk))
     val a = ApproveBlockProtocolTest.invalidApproval(candidate)
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
     ctx.tick(1.millisecond)
     sigs.get.unsafeRunSync.size should be(0)
     metricsTest.counters.get(ApproveBlockProtocol.METRICS_APPROVAL_COUNTER_NAME) should be(None)
@@ -109,7 +109,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
                                               interval = 1.millisecond,
                                               sigs.map(_._2).toSet)
     ctx.tick(startTime.milliseconds) //align clocks
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
 
     (1 to n).foreach { i =>
       val (validatorSk, validatorPk) = sigs(i - 1)
@@ -142,7 +142,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
                                               sigs.map(_._2).toSet)
     ctx.tick(startTime.milliseconds) // align clocks
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
 
     (1 to (n / 2)).foreach { i =>
       val (validatorSk, validatorPk) = sigs(i - 1)
@@ -189,7 +189,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
 
     ctx.tick(startTime.milliseconds) // align clocks
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
     ctx.tick()
 
     lab.get.runAsync.value.nonEmpty should be(true)
@@ -210,7 +210,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
       ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 1.millisecond, Set(validatorPk))
     val a = ApproveBlockProtocolTest.approval(candidate, invalidSk, invalidPk)
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
     sigsF.get.unsafeRunSync.size should be(0)
     metricsTest.counters.get(ApproveBlockProtocol.METRICS_APPROVAL_COUNTER_NAME) should be(None)
     abp.addApproval(a).unsafeRunSync
@@ -232,7 +232,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
     val TestFixture(_, abp, candidate, _, sigsF) =
       ApproveBlockProtocolTest.createProtocol(10, 100.milliseconds, 5.millisecond, Set(validatorPk))
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
 
     // I know that testing the logs is not the best way but I comparing messages sent won't work
     // because we attach `System.currentMillis` to every message.
@@ -263,7 +263,7 @@ class ApproveBlockProtocolTest extends FlatSpec with Matchers {
     val startTime = start
     ctx.tick(startTime.milliseconds) // align clocks
 
-    val cancelToken = abp.run().fork.runAsync
+    val cancelToken = abp.run().start.runAsync
     ctx.tick()
 
     // I know that testing the logs is not the best way but I comparing messages sent won't work

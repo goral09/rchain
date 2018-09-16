@@ -17,9 +17,9 @@ class CellSpec extends FunSpec with Matchers with BeforeAndAfterEach {
     it("should allow thread-safe concurrent state modification") {
       run(cell =>
         for {
-          f1  <- justIncrement(cell).fork
-          f2  <- justIncrement(cell).fork
-          f3  <- justIncrement(cell).fork
+          f1  <- justIncrement(cell).start
+          f2  <- justIncrement(cell).start
+          f3  <- justIncrement(cell).start
           _   <- f1.join
           _   <- f2.join
           _   <- f3.join
@@ -38,9 +38,9 @@ class CellSpec extends FunSpec with Matchers with BeforeAndAfterEach {
 
       run(cell =>
         for {
-          f1  <- incrementAndStore("worker1", cell, external).fork
-          f2  <- incrementAndStore("worker2", cell, external).fork
-          f3  <- incrementAndStore("worker3", cell, external).fork
+          f1  <- incrementAndStore("worker1", cell, external).start
+          f2  <- incrementAndStore("worker2", cell, external).start
+          f3  <- incrementAndStore("worker3", cell, external).start
           _   <- f1.join
           _   <- f2.join
           _   <- f3.join
