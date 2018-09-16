@@ -368,6 +368,7 @@ object ProtoUtil {
       .withUser(ByteString.EMPTY)
       .withTimestamp(timestamp)
       .withTerm(term)
+      .withPhloLimit(Integer.MAX_VALUE)
   }
 
   def basicDeploy(id: Int): Deploy = {
@@ -398,14 +399,18 @@ object ProtoUtil {
       raw = Some(sourceDeploy(source.code, timestamp, phloLimit))
     )
 
-  def termDeploy(term: Par, timestamp: Long): Deploy =
+  def termDeploy(term: Par, timestamp: Long, phloLimit: Integer): Deploy =
     Deploy(
       term = Some(term),
-      raw =
-        Some(DeployData(user = ByteString.EMPTY, timestamp = timestamp, term = term.toProtoString))
+      raw = Some(
+        DeployData(user = ByteString.EMPTY,
+                   timestamp = timestamp,
+                   term = term.toProtoString,
+                   phloLimit = phloLimit))
     )
 
-  def termDeployNow(term: Par): Deploy = termDeploy(term, System.currentTimeMillis())
+  def termDeployNow(term: Par, phloLimit: Integer): Deploy =
+    termDeploy(term, System.currentTimeMillis(), phloLimit)
 
   /**
     * Strip a deploy down to the fields we are using to seed the Deterministic name generator.

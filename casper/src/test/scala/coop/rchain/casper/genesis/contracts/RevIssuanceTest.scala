@@ -56,7 +56,8 @@ class RevIssuanceTest extends FlatSpec with Matchers {
 
     val unlockDeploy = ProtoUtil.termDeployNow(mkTerm(s"""
       |@"$ethAddress"!(["$pubKey", "$statusOut"], "${Base16.encode(unlockSig)}")
-    """.stripMargin).right.get)
+    """.stripMargin).right.get,
+                                               Integer.MAX_VALUE)
 
     val nonce             = 0
     val amount            = 15
@@ -79,7 +80,9 @@ class RevIssuanceTest extends FlatSpec with Matchers {
        |  @(wallet, "transfer")!($amount, $nonce, "${Base16
                   .encode(transferSig)}", "$destination", "$transferStatusOut")
        |}
-     """.stripMargin).right.get)
+     """.stripMargin).right.get,
+      Integer.MAX_VALUE
+    )
 
     val (postGenHash, _)    = runtimeManager.computeState(emptyHash, genesisDeploys)
     val (postUnlockHash, _) = runtimeManager.computeState(postGenHash, unlockDeploy :: Nil)

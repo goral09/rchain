@@ -2,37 +2,31 @@ package coop.rchain.casper
 
 import java.nio.file.Files
 
-import cats.effect.Bracket
-import cats.{Id, Monad}
 import cats.implicits._
-import cats.mtl.MonadState
 import cats.mtl.implicits._
+import cats.{Id, Monad}
 import com.google.protobuf.ByteString
 import coop.rchain.blockstorage.BlockStore
-import coop.rchain.blockstorage.BlockStore.BlockHash
 import coop.rchain.casper.Estimator.{BlockHash, Validator}
 import coop.rchain.casper.genesis.Genesis
-import coop.rchain.casper.genesis.contracts.{ProofOfStake, ProofOfStakeValidator, Rev}
-import coop.rchain.casper.helper.{BlockGenerator, BlockStoreFixture, IndexedBlockDag}
+import coop.rchain.casper.genesis.contracts.{ProofOfStake, ProofOfStakeValidator}
 import coop.rchain.casper.helper.BlockGenerator._
+import coop.rchain.casper.helper.{BlockGenerator, BlockStoreFixture, IndexedBlockDag}
 import coop.rchain.casper.protocol.Event.EventInstance
 import coop.rchain.casper.protocol._
 import coop.rchain.casper.util.ProtoUtil
-import coop.rchain.casper.util.ProtoUtil.termDeploy
-import coop.rchain.casper.util.rholang.{InterpreterUtil, RuntimeManager}
+import coop.rchain.casper.util.rholang.RuntimeManager
 import coop.rchain.crypto.codec.Base16
 import coop.rchain.crypto.signatures.Ed25519
-import coop.rchain.models.Par
 import coop.rchain.p2p.EffectsTestInstances.LogStub
 import coop.rchain.rholang.interpreter.Runtime
-import coop.rchain.rholang.math.NonNegativeNumber
-import coop.rchain.rholang.mint.MakeMint
-import coop.rchain.rholang.wallet.BasicWallet
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 import coop.rchain.shared.Time
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterEach, FlatSpec, Matchers}
 
 import scala.collection.immutable.HashMap
+import scala.concurrent.Await
 
 class ValidateTest
     extends FlatSpec
@@ -426,7 +420,8 @@ class ValidateTest
     val proofOfStakeValidators = bonds.map(bond => ProofOfStakeValidator(bond._1, bond._2)).toSeq
     val proofOfStakeStubPar    = ProofOfStake(proofOfStakeValidators).term
     val genesis = Genesis.withContracts(
-      List(ProtoUtil.termDeploy(proofOfStakeStubPar, System.currentTimeMillis())),
+      List(
+        ProtoUtil.termDeploy(proofOfStakeStubPar, System.currentTimeMillis(), Integer.MAX_VALUE)),
       initial,
       emptyStateHash,
       runtimeManager)

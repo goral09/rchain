@@ -26,12 +26,13 @@ import scala.concurrent.{Await, SyncVar}
 import scala.util.{Failure, Success, Try}
 
 //runtime is a SyncVar for thread-safety, as all checkpoints share the same "hot store"
-class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: SyncVar[Runtime]) {
+class RuntimeManager private (val emptyStateHash: ByteString,
+                              val runtimeContainer: SyncVar[Runtime]) {
 
   def captureResults(start: StateHash, term: Par, name: String = "__SCALA__")(
       implicit scheduler: Scheduler): Seq[Par] = {
     val runtime                   = runtimeContainer.take()
-    val deploy                    = ProtoUtil.termDeploy(term, System.currentTimeMillis())
+    val deploy                    = ProtoUtil.termDeploy(term, System.currentTimeMillis(), Integer.MAX_VALUE)
     val (_, Seq(processedDeploy)) = newEval(deploy :: Nil, runtime, start)
 
     //TODO: Is better error handling needed here?
@@ -143,12 +144,11 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
         case deploy +: rem =>
           runtime.space.reset(hash)
           val deployPhloLimit = deploy.raw.get.phloLimit
-          Await.ready(
-            runtime.reducer.setAvailablePhlos(CostAccount(deployPhloLimit)).runAsync,
-            1.second) //FIXME
+          Await.ready(runtime.reducer.setAvailablePhlos(CostAccount(deployPhloLimit)).runAsync,
+                      1.second) //FIXME
           val (phlosLeft, errors) = injAttempt(deploy, runtime.reducer, runtime.errorLog)
-          val cost      = phlosLeft.copy(cost = deployPhloLimit - phlosLeft.cost)
-          val newCheckpoint = runtime.space.createCheckpoint()
+          val cost                = phlosLeft.copy(cost = deployPhloLimit - phlosLeft.cost)
+          val newCheckpoint       = runtime.space.createCheckpoint()
           val deployResult = InternalProcessedDeploy(deploy,
                                                      cost,
                                                      newCheckpoint.log,
@@ -178,7 +178,7 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
             runtime.replayReducer.setAvailablePhlos(CostAccount(deployPhloLimit)).runAsync,
             1.second) //FIXME
           val (phlosLeft, errors) = injAttempt(deploy, runtime.replayReducer, runtime.errorLog)
-          val cost      = phlosLeft.copy(cost = deployPhloLimit - phlosLeft.cost)
+          val cost                = phlosLeft.copy(cost = deployPhloLimit - phlosLeft.cost)
           DeployStatus.fromErrors(errors) match {
             case int: InternalErrors => Left(Some(deploy) -> int)
             case replayStatus =>
@@ -208,15 +208,15 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
     Try(reducer.inj(deploy.term.get).unsafeRunSync) match {
       case Success(_) =>
         val errors   = errorLog.readAndClearErrorVector()
-        val costAcc = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
-        val phloLeft     = CostAccount.toProto(costAcc)
+        val costAcc  = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
+        val phloLeft = CostAccount.toProto(costAcc)
         phloLeft -> errors
 
       case Failure(ex) =>
         val otherErrors = errorLog.readAndClearErrorVector()
         val errors      = otherErrors :+ ex
-        val costAcc    = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
-        val phloLeft        = CostAccount.toProto(costAcc)
+        val costAcc     = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
+        val phloLeft    = CostAccount.toProto(costAcc)
         phloLeft -> errors
     }
   }

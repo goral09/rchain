@@ -15,8 +15,9 @@ class RuntimeManagerTest extends FlatSpec with Matchers {
   val runtimeManager   = RuntimeManager.fromRuntime(activeRuntime)
 
   "computeState" should "capture rholang errors" in {
-    val badRholang       = """ for(@x <- @"x"; @y <- @"y"){ @"xy"!(x + y) } | @"x"!(1) | @"y"!("hi") """
-    val deploy           = ProtoUtil.termDeployNow(InterpreterUtil.mkTerm(badRholang).right.get)
+    val badRholang = """ for(@x <- @"x"; @y <- @"y"){ @"xy"!(x + y) } | @"x"!(1) | @"y"!("hi") """
+    val deploy =
+      ProtoUtil.termDeployNow(InterpreterUtil.mkTerm(badRholang).right.get, Integer.MAX_VALUE)
     val (_, Seq(result)) = runtimeManager.computeState(runtimeManager.emptyStateHash, deploy :: Nil)
 
     result.status.isFailed should be(true)
@@ -28,7 +29,7 @@ class RuntimeManagerTest extends FlatSpec with Matchers {
     val deploys = Seq(
       NonNegativeNumber.term,
       InterpreterUtil.mkTerm(s""" @"NonNegativeNumber"!($purseValue, "nn") """).right.get
-    ).map(ProtoUtil.termDeploy(_, System.currentTimeMillis()))
+    ).map(ProtoUtil.termDeploy(_, System.currentTimeMillis(), Integer.MAX_VALUE))
 
     val (hash, _) = runtimeManager.computeState(runtimeManager.emptyStateHash, deploys)
     val result = runtimeManager.captureResults(
@@ -80,12 +81,15 @@ class RuntimeManagerTest extends FlatSpec with Matchers {
   "computeState" should "charge deploys separately" in {
     val terms = List(
       """for(@x <- @"w") { @"z"!("Got x") }""",
-      """for(@x <- @"x"; @y <- @"y"){ @"xy"!(x + y) } | @"x"!(1) | @"y"!(10)"""
+      """for(@x <- @"x"){ @"xy"!(x) } | @"x"!(1) | @"y"!(10)"""
     )
 
     def deployCost(p: Seq[InternalProcessedDeploy]): Long = p.map(_.cost.cost).sum
-    val deploy = terms.map(t =>
-      ProtoUtil.termDeploy(InterpreterUtil.mkTerm(t).right.get, System.currentTimeMillis()))
+    val deploy = terms.map(
+      t =>
+        ProtoUtil.termDeploy(InterpreterUtil.mkTerm(t).right.get,
+                             System.currentTimeMillis(),
+                             Integer.MAX_VALUE))
     val (_, firstDeploy) =
       runtimeManager.computeState(runtimeManager.emptyStateHash, deploy.head :: Nil)
     val (_, secondDeploy) =
