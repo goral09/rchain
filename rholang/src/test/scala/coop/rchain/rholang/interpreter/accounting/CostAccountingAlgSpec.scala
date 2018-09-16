@@ -38,7 +38,7 @@ class CostAccountingAlgSpec extends FlatSpec with TripleEqualsSupport {
     val test = for {
       _ <- alg.charge(c)
       s <- alg.get()
-    } yield assert(defaultCost.charge(c) === s)
+    } yield assert(defaultCost + c === s)
 
     Await.result(test.runAsync, 1.second)
   }
