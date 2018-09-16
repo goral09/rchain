@@ -8,7 +8,7 @@ import coop.rchain.crypto.hash.Blake2b512Random
 import coop.rchain.models.Par
 import coop.rchain.models.rholang.implicits.VectorPar
 import coop.rchain.models.rholang.sort.Sortable
-import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 import coop.rchain.rholang.interpreter.errors.{
   InterpreterError,
   SyntaxError,
@@ -93,13 +93,15 @@ object Interpreter {
     } yield result
 
   def evaluate(runtime: Runtime, normalizedTerm: Par): Task[EvaluateResult] = {
-    implicit val rand = Blake2b512Random(128)
+    implicit val rand        = Blake2b512Random(128)
+    val evaluationPhlosLimit = CostAccount(Integer.MAX_VALUE)
     for {
       checkpoint <- Task.now(runtime.space.createCheckpoint())
-      _          <- runtime.reducer.setAvailablePhlos(CostAccount(Integer.MAX_VALUE))
+      _          <- runtime.reducer.setAvailablePhlos(evaluationPhlosLimit)
       _          <- runtime.reducer.inj(normalizedTerm)(rand)
       errors     <- Task.now(runtime.readAndClearErrorVector())
-      cost       <- runtime.reducer.getAvailablePhlos()
+      leftPhlos  <- runtime.reducer.getAvailablePhlos()
+      cost       = leftPhlos.copy(cost = evaluationPhlosLimit.cost - leftPhlos.cost)
       _          <- Task.now(if (errors.nonEmpty) runtime.space.reset(checkpoint.root))
     } yield EvaluateResult(cost, errors)
   }
