@@ -221,7 +221,7 @@ object Reduce {
     override def inj(par: Par)(implicit rand: Blake2b512Random,
                                costAccountingAlg: CostAccountingAlg[M]): M[Unit] =
       for {
-        _ <- costAccountingAlg.set(CostAccount.zero)
+        _ <- costAccountingAlg.set(CostAccount(Integer.MAX_VALUE))
         _ <- eval(par)(Env[Par](), rand, costAccountingAlg)
       } yield ()
 

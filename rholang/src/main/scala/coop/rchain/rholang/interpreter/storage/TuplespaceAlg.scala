@@ -43,18 +43,19 @@ object TuplespaceAlg {
           case Right(Some((continuation, dataList))) =>
             val rspaceMatchCost =
               dataList
-                .map(_.cost.map(CostAccount.fromProto(_)).getOrElse(CostAccount.zero))
+                .map(_.cost.map(CostAccount.fromProto(_)).getOrElse(CostAccount(Integer.MAX_VALUE)))
                 .toList
                 .combineAll
             if (persistent) {
-              List(dispatcher.dispatch(continuation, dataList) *> F.pure(CostAccount.zero),
+              List(dispatcher.dispatch(continuation, dataList) *> F.pure(
+                     CostAccount(Integer.MAX_VALUE)),
                    produce(channel, data, persistent)).parSequence
                 .map(_.combineAll + rspaceMatchCost)
             } else {
               dispatcher.dispatch(continuation, dataList) *> rspaceMatchCost.pure[F]
             }
 
-          case Right(None) => F.pure(CostAccount.zero)
+          case Right(None) => F.pure(CostAccount(Integer.MAX_VALUE))
         }
 
       for {
@@ -78,19 +79,23 @@ object TuplespaceAlg {
               case Right(Some((continuation, dataList))) =>
                 val rspaceMatchCost =
                   dataList
-                    .map(_.cost.map(CostAccount.fromProto(_)).getOrElse(CostAccount.zero))
+                    .map(
+                      _.cost
+                        .map(CostAccount.fromProto(_))
+                        .getOrElse(CostAccount(Integer.MAX_VALUE)))
                     .toList
                     .combineAll
 
                 dispatcher.dispatch(continuation, dataList)
                 if (persistent) {
-                  List(dispatcher.dispatch(continuation, dataList) *> F.pure(CostAccount.zero),
+                  List(dispatcher.dispatch(continuation, dataList) *> F.pure(
+                         CostAccount(Integer.MAX_VALUE)),
                        consume(binds, body, persistent)).parSequence
                     .map(_.combineAll + rspaceMatchCost)
                 } else {
                   dispatcher.dispatch(continuation, dataList) *> rspaceMatchCost.pure[F]
                 }
-              case Right(None) => F.pure(CostAccount.zero)
+              case Right(None) => F.pure(CostAccount(Integer.MAX_VALUE))
             }
 
           for {

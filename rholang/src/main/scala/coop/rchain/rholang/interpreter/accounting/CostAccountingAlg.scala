@@ -28,7 +28,7 @@ object CostAccountingAlg {
     override def charge(cost: Cost): F[Unit] =
       for {
         _ <- failOnOutOfPhlo
-        _ <- state.update(_ + cost)
+        _ <- state.update(_ - cost)
         _ <- failOnOutOfPhlo
       } yield ()
     override def get: F[CostAccount]             = state.get
