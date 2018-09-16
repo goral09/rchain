@@ -387,13 +387,15 @@ object ProtoUtil {
     )
   }
 
-  def sourceDeploy(source: String, timestamp: Long): DeployData =
-    DeployData(user = ByteString.EMPTY, timestamp = timestamp, term = source)
+  def sourceDeploy(source: String, timestamp: Long, phloLimit: Integer): DeployData =
+    DeployData(user = ByteString.EMPTY, timestamp = timestamp, term = source, phloLimit = phloLimit)
 
-  def compiledSourceDeploy(source: CompiledRholangSource, timestamp: Long): Deploy =
+  def compiledSourceDeploy(source: CompiledRholangSource,
+                           timestamp: Long,
+                           phloLimit: Integer): Deploy =
     Deploy(
       term = Some(source.term),
-      raw = Some(sourceDeploy(source.code, timestamp))
+      raw = Some(sourceDeploy(source.code, timestamp, phloLimit))
     )
 
   def termDeploy(term: Par, timestamp: Long): Deploy =

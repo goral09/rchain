@@ -49,7 +49,7 @@ object Genesis {
       WalletCheck,
       new PreWalletRev(wallets),
       ProofOfStake(validators)
-    ).map(compiledSourceDeploy(_, timestamp))
+    ).map(compiledSourceDeploy(_, timestamp, Integer.MAX_VALUE))
 
   def withContracts(initial: BlockMessage,
                     validators: Seq[ProofOfStakeValidator],
