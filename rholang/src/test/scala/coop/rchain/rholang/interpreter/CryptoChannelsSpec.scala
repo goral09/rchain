@@ -15,15 +15,14 @@ import coop.rchain.models.rholang.implicits._
 import coop.rchain.models.serialization.implicits._
 import coop.rchain.models.testImplicits._
 import coop.rchain.rholang.interpreter.Runtime.RhoIStore
-import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 import coop.rchain.rspace.Serialize
-import coop.rchain.rspace.internal.{Datum, Row}
 import coop.rchain.shared.PathOps._
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
 import org.scalactic.TripleEqualsSupport
 import org.scalatest.prop.PropertyChecks
-import org.scalatest.{fixture, Assertion, Matchers, Outcome}
+import org.scalatest.{Assertion, Matchers, Outcome, fixture}
 
 import scala.collection.immutable.BitSet
 import scala.concurrent.Await
@@ -34,6 +33,7 @@ class CryptoChannelsSpec
     with PropertyChecks
     with Matchers
     with TripleEqualsSupport {
+
   behavior of "Crypto channels"
 
   implicit val rand: Blake2b512Random               = Blake2b512Random(Array.empty[Byte])
@@ -63,12 +63,10 @@ class CryptoChannelsSpec
   def assertStoreContains(store: RhoIStore)(ackChannel: GString)(
       data: ListChannelWithRandom): Assertion = {
     val channel = Channel(Quote(ackChannel))
-    store.toMap(List(channel)) should be(
-      Row(
-        List(Datum.create[Channel, ListChannelWithRandom](channel, data, false)),
-        List()
-      )
-    )
+    val datum   = store.toMap(List(channel)).data.head
+    assert(datum.a.channels == data.channels)
+    assert(datum.a.randomState == data.randomState)
+    assert(!datum.persist)
   }
 
   def hashingChannel(channelName: String,
@@ -77,7 +75,7 @@ class CryptoChannelsSpec
       implicit
       serializeChannel: Serialize[Channel],
       serializeChannels: Serialize[ListChannelWithRandom]): Any = {
-    val (reduce, store) = fixture
+    val (reduce, store, errorLog) = fixture
 
     val serializeAndHash: (Array[Byte] => Array[Byte]) => Par => Array[Byte] =
       hashFn => serialize andThen hashFn
@@ -100,7 +98,9 @@ class CryptoChannelsSpec
       // 1. meet with the system process in the tuplespace
       // 2. hash input array
       // 3. send result on supplied ack channel
-      Await.result(reduce.eval(send).runAsync, 3.seconds)
+      val result = Await.result(reduce.eval(send).attempt.runAsync, 3.seconds)
+      assert(result.isRight)
+      assert(errorLog.readAndClearErrorVector().isEmpty)
       storeContainsTest(ListChannelWithRandom(Seq(Quote(expected)), rand, Some(PCost(0, 0))))
       clearStore(store, reduce, ackChannel)
     }
@@ -127,7 +127,7 @@ class CryptoChannelsSpec
 
   "secp256k1Verify channel" should "verify integrity of the data and send result on ack channel" in {
     fixture =>
-      val (reduce, store) = fixture
+      val (reduce, store, errorLog) = fixture
 
       val secp256k1VerifyhashChannel = Quote(GString("secp256k1Verify"))
 
@@ -156,7 +156,9 @@ class CryptoChannelsSpec
                         List(serializedPar, signaturePar, pubKeyPar, ackChannel),
                         persistent = false,
                         BitSet())
-        Await.result(reduce.eval(send).runAsync, 3.seconds)
+        val result = Await.result(reduce.eval(send).attempt.runAsync, 3.seconds)
+        assert(result.isRight)
+        assert(errorLog.readAndClearErrorVector().isEmpty)
         storeContainsTest(
           ListChannelWithRandom(Seq(Quote(Expr(GBool(true)))), rand, Some(PCost(0, 0))))
         clearStore(store, reduce, ackChannel)
@@ -165,7 +167,7 @@ class CryptoChannelsSpec
 
   "ed25519Verify channel" should "verify integrity of the data and send result on ack channel" in {
     fixture =>
-      val (reduce, store) = fixture
+      val (reduce, store, errorLog) = fixture
 
       implicit val rand = Blake2b512Random(Array.empty[Byte])
 
@@ -193,7 +195,9 @@ class CryptoChannelsSpec
                         List(serializedPar, signaturePar, pubKeyPar, ackChannel),
                         persistent = false,
                         BitSet())
-        Await.result(reduce.eval(send).runAsync, 3.seconds)
+        val result = Await.result(reduce.eval(send).attempt.runAsync, 3.seconds)
+        assert(result.isRight)
+        assert(errorLog.readAndClearErrorVector().isEmpty)
         storeContainsTest(
           ListChannelWithRandom(List(Quote(Expr(GBool(true)))), rand, Some(PCost(0, 0))))
         clearStore(store, reduce, ackChannel)
@@ -207,7 +211,9 @@ class CryptoChannelsSpec
     val runtime   = Runtime.create(dbDir, size)
 
     try {
-      test((runtime.reducer, runtime.space.store))
+      Await.ready(runtime.reducer.setAvailablePhlos(CostAccount(Integer.MAX_VALUE)).runAsync,
+                  1.second)
+      test((runtime.reducer, runtime.space.store, runtime.errorLog))
     } finally {
       runtime.close()
       dbDir.recursivelyDelete
@@ -217,6 +223,6 @@ class CryptoChannelsSpec
   /** TODO(mateusz.gorski): once we refactor Rholang[AndScala]Dispatcher
     *  to push effect choice up until declaration site refactor to `Reduce[Coeval]`
     */
-  override type FixtureParam = (Reducer[Task], RhoIStore)
+  override type FixtureParam = (Reducer[Task], RhoIStore, ErrorLog)
 
 }
