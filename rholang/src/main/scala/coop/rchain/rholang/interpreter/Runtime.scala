@@ -139,10 +139,9 @@ object Runtime {
     val errorLog                                  = new ErrorLog()
     implicit val ft: FunctorTell[Task, Throwable] = errorLog
 
-    def dispatchTableCreator(space: RhoISpace, dispatcher: RhoDispatch): RhoDispatchMap = {
+    def dispatchTableCreator(pureSpace: RhoPureSpace, dispatcher: RhoDispatch): RhoDispatchMap = {
       import BodyRefs._
-      val pureSpace: RhoPureSpace = new PureRSpace(space)
-      val registry                = new Registry(pureSpace, dispatcher)
+      val registry = new Registry(pureSpace, dispatcher)
       Map(
         STDOUT                     -> SystemProcesses.stdout,
         STDOUT_ACK                 -> SystemProcesses.stdoutAck(space, dispatcher),
@@ -175,7 +174,7 @@ object Runtime {
     // replay
     lazy val replayPureSpace = PureRSpace[Task].of(replaySpace)
     lazy val replayDispatchTable: Map[Ref, Seq[ListChannelWithRandom] => Task[Unit]] =
-      dispatchTableCreator(replaySpace, replayDispatcher)
+      dispatchTableCreator(replayPureSpace, replayDispatcher)
     lazy val replayTuplespaceAlg =
       TuplespaceAlg.rspaceTuplespace[Task, Task.Par](replayPureSpace, replayDispatcher)
     lazy val replayCostAccounting = CostAccountingAlg.unsafe[Task](CostAccount.zero)
@@ -189,7 +188,7 @@ object Runtime {
     // pure
     lazy val pureSpace = PureRSpace[Task].of(space)
     lazy val dispatchTable: Map[Ref, Seq[ListChannelWithRandom] => Task[Unit]] =
-      dispatchTableCreator(space, dispatcher)
+      dispatchTableCreator(pureSpace, dispatcher)
     lazy val tuplespaceAlg  = TuplespaceAlg.rspaceTuplespace[Task, Task.Par](pureSpace, dispatcher)
     lazy val costAccounting = CostAccountingAlg.unsafe[Task](CostAccount.zero)
     lazy val reducer: ChargingReducer[Task] =
