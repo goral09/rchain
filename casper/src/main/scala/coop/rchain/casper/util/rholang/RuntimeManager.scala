@@ -142,11 +142,13 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
       terms match {
         case deploy +: rem =>
           runtime.space.reset(hash)
+          val deployPhloLimit = deploy.raw.get.phloLimit
           Await.ready(
-            runtime.reducer.setAvailablePhlos(CostAccount(deploy.raw.get.phloLimit)).runAsync,
+            runtime.reducer.setAvailablePhlos(CostAccount(deployPhloLimit)).runAsync,
             1.second) //FIXME
-          val (cost, errors) = injAttempt(deploy, runtime.reducer, runtime.errorLog)
-          val newCheckpoint  = runtime.space.createCheckpoint()
+          val (phlosLeft, errors) = injAttempt(deploy, runtime.reducer, runtime.errorLog)
+          val cost      = phlosLeft.copy(cost = deployPhloLimit - phlosLeft.cost)
+          val newCheckpoint = runtime.space.createCheckpoint()
           val deployResult = InternalProcessedDeploy(deploy,
                                                      cost,
                                                      newCheckpoint.log,
@@ -171,7 +173,12 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
         case InternalProcessedDeploy(deploy, _, log, status) +: rem =>
           runtime.replaySpace.rig(hash, log.toList)
           //TODO: compare replay deploy cost to given deploy cost
-          val (replayCost, errors) = injAttempt(deploy, runtime.replayReducer, runtime.errorLog)
+          val deployPhloLimit = deploy.raw.get.phloLimit
+          Await.ready(
+            runtime.replayReducer.setAvailablePhlos(CostAccount(deployPhloLimit)).runAsync,
+            1.second) //FIXME
+          val (phlosLeft, errors) = injAttempt(deploy, runtime.replayReducer, runtime.errorLog)
+          val cost      = phlosLeft.copy(cost = deployPhloLimit - phlosLeft.cost)
           DeployStatus.fromErrors(errors) match {
             case int: InternalErrors => Left(Some(deploy) -> int)
             case replayStatus =>
@@ -201,16 +208,16 @@ class RuntimeManager private (val emptyStateHash: ByteString, runtimeContainer: 
     Try(reducer.inj(deploy.term.get).unsafeRunSync) match {
       case Success(_) =>
         val errors   = errorLog.readAndClearErrorVector()
-        val phloLeft = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
-        val cost     = CostAccount.toProto(phloLeft)
-        cost -> errors
+        val costAcc = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
+        val phloLeft     = CostAccount.toProto(costAcc)
+        phloLeft -> errors
 
       case Failure(ex) =>
         val otherErrors = errorLog.readAndClearErrorVector()
         val errors      = otherErrors :+ ex
-        val phloLeft    = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
-        val cost        = CostAccount.toProto(phloLeft)
-        cost -> errors
+        val costAcc    = Await.result(reducer.getAvailablePhlos().runAsync, 1.second)
+        val phloLeft        = CostAccount.toProto(costAcc)
+        phloLeft -> errors
     }
   }
 }
