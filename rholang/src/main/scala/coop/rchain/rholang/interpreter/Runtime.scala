@@ -22,8 +22,8 @@ import monix.eval.Task
 
 import scala.collection.immutable
 
-class Runtime private (val reducer: Reduce[Task],
-                       val replayReducer: Reduce[Task],
+class Runtime private (val reducer: ChargingReducer[Task],
+                       val replayReducer: ChargingReducer[Task],
                        val space: RhoISpace,
                        val replaySpace: RhoReplayRSpace,
                        var errorLog: ErrorLog,
@@ -176,10 +176,10 @@ object Runtime {
     lazy val replayDispatchTable: RhoDispatchMap =
       dispatchTableCreator(replaySpace, replayDispatcher)
 
-    lazy val dispatcher: RhoDispatch =
+    lazy val (dispatcher: RhoDispatch, chargingReducer: ChargingReducer[Task]) =
       RholangAndScalaDispatcher.create(space, dispatchTable, urnMap)
 
-    lazy val replayDispatcher: RhoDispatch =
+    lazy val (replayDispatcher: RhoDispatch, replayChargingReducer: ChargingReducer[Task]) =
       RholangAndScalaDispatcher.create(replaySpace, replayDispatchTable, urnMap)
 
     val procDefs: immutable.Seq[(Name, Arity, Remainder, Ref)] = {
@@ -202,6 +202,6 @@ object Runtime {
 
     assert(res.forall(_.isEmpty))
 
-    new Runtime(dispatcher.reducer, replayDispatcher.reducer, space, replaySpace, errorLog, context)
+    new Runtime(chargingReducer, replayChargingReducer, space, replaySpace, errorLog, context)
   }
 }

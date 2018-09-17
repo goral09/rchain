@@ -4,7 +4,7 @@ import java.nio.file.{Files, Path}
 
 import coop.rchain.crypto.hash.Blake2b512Random
 import coop.rchain.models.Par
-import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
+import coop.rchain.rholang.interpreter.accounting.{Cost, CostAccount, CostAccountingAlg}
 import coop.rchain.rholang.interpreter.{Interpreter, Runtime}
 import coop.rchain.rspace.bench.WideBench.WideBenchState
 import monix.eval.Task
@@ -15,6 +15,7 @@ import coop.rchain.catscontrib.TaskContrib._
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
+import scala.concurrent.duration._
 
 class WideBench {
 
@@ -43,8 +44,7 @@ object WideBench {
 
     lazy val runtime: Runtime  = Runtime.create(dbDir, mapSize)
     def rand: Blake2b512Random = Blake2b512Random(128)
-    val costAccountAlg: CostAccountingAlg[Task] =
-      CostAccountingAlg.unsafe[Task](CostAccount(Integer.MAX_VALUE))
+    Await.ready(runtime.reducer.setAvailablePhlos(Cost(Integer.MAX_VALUE)).runAsync, 1.second)
     var setupTerm: Option[Par] = None
     var term: Option[Par]      = None
 
@@ -89,7 +89,7 @@ object WideEvalBenchState {
   def createTest(t: Option[Par], state: WideBenchState): Task[Vector[Throwable]] = {
     val par = t.getOrElse(throw new Error("Failed to prepare executable rholang term"))
     state.runtime.reducer
-      .inj(par)(state.rand, state.costAccountAlg)
+      .inj(par)(state.rand)
       .map(_ => state.runtime.readAndClearErrorVector())
   }
 

@@ -7,7 +7,7 @@ import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
 import coop.rchain.models.Expr.ExprInstance._
 import coop.rchain.models._
 import coop.rchain.models.rholang.implicits._
-import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
+import coop.rchain.rholang.interpreter.accounting.{Cost, CostAccount, CostAccountingAlg}
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
 import coop.rchain.rholang.interpreter.storage.implicits._
 import coop.rchain.rspace._
@@ -26,7 +26,7 @@ trait RegistryTester extends PersistentStoreTester {
   implicit val costAccounting =
     CostAccountingAlg.unsafe[Task](CostAccount(Integer.MAX_VALUE))
   def withRegistryAndTestSpace[R](
-      f: (Reduce[Task],
+      f: (ChargingReducer[Task],
           FreudianSpace[Channel,
                         BindPattern,
                         OutOfPhlogistonsError.type,
@@ -37,10 +37,10 @@ trait RegistryTester extends PersistentStoreTester {
     withTestSpace { space =>
       val pureSpace: Runtime.RhoPureSpace = new PureRSpace(space)
       lazy val registry: Registry         = new Registry(pureSpace, dispatcher)
-      lazy val dispatcher: Dispatch[Task, ListChannelWithRandom, TaggedContinuation] =
+      lazy val (dispatcher, reducer) =
         RholangAndScalaDispatcher
           .create[Task, Task.Par](space, registry.testingDispatchTable, Registry.testingUrnMap)
-      val reducer = dispatcher.reducer
+      Await.ready(reducer.setAvailablePhlos(Cost(Integer.MAX_VALUE)).runAsync, 1.second)
       registry.testInstall()
       f(reducer, space)
     }

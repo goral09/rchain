@@ -80,7 +80,7 @@ class RuntimeManagerTest extends FlatSpec with Matchers {
   "computeState" should "charge deploys separately" in {
     val terms = List(
       """for(@x <- @"w") { @"z"!("Got x") }""",
-      """for(@x <- @"x"; @y <- @"y"){ @"xy"!(x + y) } | @"x"!(1) | @"y"!(10)"""
+      """for(@x <- @"x"){ @"xy"!(x) } | @"x"!(1) | @"y"!(10)"""
     )
 
     def deployCost(p: Seq[InternalProcessedDeploy]): Long = p.map(_.cost.cost).sum
@@ -94,10 +94,13 @@ class RuntimeManagerTest extends FlatSpec with Matchers {
       runtimeManager.computeState(runtimeManager.emptyStateHash, deploy)
     assert(firstDeploy.size == 1)
     val firstDeployCost = deployCost(firstDeploy)
+    println(s"firstDeployCost $firstDeployCost")
     assert(secondDeploy.size == 1)
     val secondDeployCost = deployCost(secondDeploy)
+    println(s"secondDeployCost $secondDeployCost")
     assert(compoundDeploy.size == 2)
     val compoundDeployCost = deployCost(compoundDeploy)
+    println(s"compoundDeployCost $compoundDeployCost")
     assert(firstDeployCost < compoundDeployCost)
     assert(secondDeployCost < compoundDeployCost)
     assert(
