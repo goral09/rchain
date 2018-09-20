@@ -34,12 +34,14 @@ object implicits {
                      ListChannelWithRandom] {
 
       def get(pattern: BindPattern, data: ListChannelWithRandom)
-        : Either[OutOfPhlogistonsError.type, Option[ListChannelWithRandom]] =
+        : Either[OutOfPhlogistonsError.type, Option[ListChannelWithRandom]] = {
+        val phloAvailable = CostAccount(Integer.MAX_VALUE) // FIXME -- must come from the input args
         SpatialMatcher
           .foldMatch(data.channels, pattern.patterns, pattern.remainder)
-          .runWithCost(CostAccount(Integer.MAX_VALUE)) // FIXME -- must come from the input args
+          .runWithCost(phloAvailable)
           .map {
-            case (cost, resultMatch) =>
+            case (phloLeft, resultMatch) =>
+              val cost = phloLeft.copy(cost = phloAvailable.cost - phloLeft.cost)
               resultMatch
                 .map {
                   case (freeMap: FreeMap, caughtRem: Seq[Channel]) =>
@@ -56,6 +58,7 @@ object implicits {
                                           Some(CostAccount.toProto(cost)))
                 }
           }
+      }
     }
 
   /* Serialize instances */
