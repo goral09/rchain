@@ -47,8 +47,11 @@ object ChargingRSpace {
                    Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
         val storageCost = storageCostConsume(channels, patterns, continuation)
         for {
-          _       <- costAlg.charge(storageCost)
-          consRes <- space.consume(channels, patterns, continuation, persist)
+          _ <- costAlg.charge(storageCost)
+          patternsWithPhlos <- costAlg
+                                .get()
+                                .map(phlos => patterns.map(_.withCost(CostAccount.toProto(phlos)))) //FIXME(mateusz.gorski)
+          consRes <- space.consume(channels, patternsWithPhlos, continuation, persist)
           _       <- handleResult(consRes, storageCost, persist)
         } yield consRes
       }
@@ -72,8 +75,11 @@ object ChargingRSpace {
                    Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
         val storageCost = storageCostProduce(channel, data)
         for {
-          _       <- costAlg.charge(storageCost)
-          prodRes <- space.produce(channel, data, persist)
+          _ <- costAlg.charge(storageCost)
+          dataWithPhlos <- costAlg
+                            .get()
+                            .map(phlos => data.withCost(CostAccount.toProto(phlos))) //FIXME(mateusz.gorski)
+          prodRes <- space.produce(channel, dataWithPhlos, persist)
           _       <- handleResult(prodRes, storageCost, persist)
         } yield prodRes
       }

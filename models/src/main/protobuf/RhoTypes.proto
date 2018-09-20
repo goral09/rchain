@@ -51,7 +51,7 @@ message PCost {
 message ListChannelWithRandom {
     repeated Channel channels = 1;
     bytes randomState = 2 [(scalapb.field).type = "coop.rchain.crypto.hash.Blake2b512Random"];
-    // cost of performing the spatial match
+    // phlos available
     PCost cost = 3;
 }
 
@@ -96,6 +96,8 @@ message BindPattern {
     repeated Channel patterns = 1;
     Var remainder = 2;
     int32 freeCount = 3;
+    // phlos available
+    PCost cost = 4;
 }
 
 message ListBindPatterns {
