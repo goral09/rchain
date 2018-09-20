@@ -56,13 +56,14 @@ object RholangOnlyDispatcher {
       s: Sync[M],
       ft: FunctorTell[M, Throwable])
     : (Dispatch[M, ListChannelWithRandom, TaggedContinuation], ChargingReducer[M]) = {
-    val pureSpace          = PureRSpace[M].of(tuplespace)
-    lazy val tuplespaceAlg = TuplespaceAlg.rspaceTuplespace(pureSpace, dispatcher)
+    implicit lazy val pureSpace = PureRSpace[M].of(tuplespace)
+    lazy val tuplespaceAlg      = TuplespaceAlg.rspaceTuplespace(chargingRSpace, dispatcher)
     lazy val dispatcher: Dispatch[M, ListChannelWithRandom, TaggedContinuation] =
       new RholangOnlyDispatcher(chargingReducer)
     implicit lazy val costAlg = CostAccountingAlg.unsafe[M](CostAccount(0))
     implicit lazy val reducer: Reduce[M] =
       new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg, urnMap)
+    lazy val chargingRSpace  = ChargingRSpace.pureRSpace[M]
     lazy val chargingReducer = new ChargingReducer[M]()
     (dispatcher, chargingReducer)
   }
