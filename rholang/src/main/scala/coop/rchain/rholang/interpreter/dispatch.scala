@@ -104,7 +104,7 @@ object RholangAndScalaDispatcher {
                                 ft: FunctorTell[M, Throwable])
     : (Dispatch[M, ListChannelWithRandom, TaggedContinuation], ChargingReducer[M], Registry[M]) = {
     implicit lazy val pureSpace = PureRSpace[M].of(tuplespace)
-    lazy val tuplespaceAlg      = TuplespaceAlg.rspaceTuplespace(pureSpace, dispatcher)
+    lazy val tuplespaceAlg      = TuplespaceAlg.rspaceTuplespace(chargingRSpace, dispatcher)
     lazy val dispatcher: Dispatch[M, ListChannelWithRandom, TaggedContinuation] =
       new RholangAndScalaDispatcher(chargingReducer, dispatchTable)
     implicit lazy val reducer: Reduce[M] =
