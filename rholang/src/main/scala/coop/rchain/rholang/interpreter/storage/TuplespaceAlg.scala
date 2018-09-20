@@ -35,6 +35,8 @@ object TuplespaceAlg {
           res: Either[OutOfPhlogistonsError.type,
                       Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]): F[Unit] =
         res match {
+          case Left(oope) =>
+            F.raiseError(oope)
           case Right(Some((continuation, dataList))) =>
             if (persistent) {
               Parallel
@@ -64,6 +66,8 @@ object TuplespaceAlg {
               res: Either[OutOfPhlogistonsError.type,
                           Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]): F[Unit] =
             res match {
+              case Left(oope) =>
+                F.raiseError(oope)
               case Right(Some((continuation, dataList))) =>
                 if (persistent) {
                   Parallel
