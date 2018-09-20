@@ -10,7 +10,7 @@ import coop.rchain.models.TaggedContinuation.TaggedCont.{Empty, ParBody, ScalaBo
 import coop.rchain.models._
 import coop.rchain.rholang.interpreter.Runtime.RhoISpace
 import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg}
-import coop.rchain.rholang.interpreter.storage.TuplespaceAlg
+import coop.rchain.rholang.interpreter.storage.{ChargingRSpace, TuplespaceAlg}
 import coop.rchain.rspace.pure.PureRSpace
 
 trait Dispatch[M[_], A, K] {
@@ -103,15 +103,16 @@ object RholangAndScalaDispatcher {
                                 s: Sync[M],
                                 ft: FunctorTell[M, Throwable])
     : (Dispatch[M, ListChannelWithRandom, TaggedContinuation], ChargingReducer[M], Registry[M]) = {
-    val pureSpace          = PureRSpace[M].of(tuplespace)
-    lazy val tuplespaceAlg = TuplespaceAlg.rspaceTuplespace(pureSpace, dispatcher)
+    implicit lazy val pureSpace = PureRSpace[M].of(tuplespace)
+    lazy val tuplespaceAlg      = TuplespaceAlg.rspaceTuplespace(pureSpace, dispatcher)
     lazy val dispatcher: Dispatch[M, ListChannelWithRandom, TaggedContinuation] =
       new RholangAndScalaDispatcher(chargingReducer, dispatchTable)
     implicit lazy val reducer: Reduce[M] =
       new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg, urnMap)
     implicit lazy val costAlg      = CostAccountingAlg.unsafe[M](CostAccount(0))
     lazy val chargingReducer       = new ChargingReducer[M]
-    lazy val registry: Registry[M] = new RegistryImpl(pureSpace, dispatcher)
+    lazy val chargingRSpace        = ChargingRSpace.pureRSpace[M]
+    lazy val registry: Registry[M] = new RegistryImpl(chargingRSpace, dispatcher)
     (dispatcher, chargingReducer, registry)
   }
 }
