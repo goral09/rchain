@@ -10,11 +10,10 @@ import coop.rchain.models.rholang.implicits._
 import coop.rchain.rholang.interpreter.Runtime.RhoPureSpace
 import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg, _}
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
-import coop.rchain.rholang.interpreter.storage.implicits._
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
 import org.scalactic.TripleEqualsSupport
-import org.scalatest.{Matchers, Outcome, fixture}
+import org.scalatest.{fixture, Matchers, Outcome}
 
 import scala.collection.immutable.{Seq => ImmSeq}
 import scala.concurrent.Await
@@ -27,7 +26,7 @@ class ChargingRSpaceTest extends fixture.FlatSpec with TripleEqualsSupport with 
   private def byteName(b: Byte): GPrivate = GPrivate(ByteString.copyFrom(Array[Byte](b)))
 
   val rand: Blake2b512Random = Blake2b512Random(Array.empty[Byte])
-  val RSPACE_MATCH_COST      = CostAccount.fromProto(TestPureRSpace.RSPACE_MATCH_PCOST)
+  val RSPACE_MATCH_COST      = CostAccount.fromProto(TestISpace.RSPACE_MATCH_PCOST)
 
   it should "charge for storing data in tuplespace" in { fixture =>
     val TestFixture(chargingRSpace, costAlg, pureRSpace) = fixture
@@ -109,14 +108,14 @@ class ChargingRSpaceTest extends fixture.FlatSpec with TripleEqualsSupport with 
 
   override protected def withFixture(test: OneArgTest): Outcome = {
     implicit val costAlg    = CostAccountingAlg.unsafe[Task](CostAccount(0))
-    implicit val pureRSpace = TestPureRSpace()
+    implicit val pureRSpace = TestISpace()
     implicit val s          = implicitly[Sync[Task]]
     val chargingRSpace      = ChargingRSpace.pureRSpace(s, costAlg, pureRSpace)
     test(TestFixture(chargingRSpace, costAlg, pureRSpace))
   }
   final case class TestFixture(chargingRSpace: ChargingRSpace,
                                costAlg: CostAccountingAlg[Task],
-                               pureRSpace: TestPureRSpace)
+                               pureRSpace: TestISpace)
 
   override type FixtureParam = TestFixture
 }

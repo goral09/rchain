@@ -13,8 +13,10 @@ import coop.rchain.models.Var.VarInstance.FreeVar
 import coop.rchain.models._
 import coop.rchain.models.rholang.implicits._
 import coop.rchain.rholang.interpreter.Registry.FixedRefs._
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 import coop.rchain.rholang.interpreter.storage.implicits._
 import org.lightningj.util.ZBase32
+import coop.rchain.rholang.interpreter.storage.implicits.matchListQuote
 
 import scala.annotation.tailrec
 import scala.collection.immutable.Seq
@@ -140,7 +142,8 @@ class RegistryImpl[F[_]](
                 freeCount = 1)
   )
 
-  def testInstall(): F[Unit] =
+  def testInstall(): F[Unit] = {
+    implicit val matchF = matchListQuote(CostAccount(Integer.MAX_VALUE))
     for {
       _ <- space.install(lookupChannels,
                          lookupPatterns,
@@ -158,6 +161,7 @@ class RegistryImpl[F[_]](
                          publicRegisterRandomPatterns,
                          TaggedContinuation(ScalaBodyRef(publicRegisterRandomRef)))
     } yield Unit
+  }
 
   private val prefixRetReplacePattern = BindPattern(
     Seq(Quote(Par(exprs = Seq(EVar(FreeVar(0))), connectiveUsed = true)),

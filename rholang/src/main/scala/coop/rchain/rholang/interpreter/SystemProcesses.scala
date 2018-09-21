@@ -14,6 +14,7 @@ import coop.rchain.rholang.interpreter.Runtime.RhoISpace
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
 import coop.rchain.rholang.interpreter.storage.implicits._
 import monix.eval.Task
+import coop.rchain.rholang.interpreter.accounting.CostAccount
 
 import scala.util.Try
 
@@ -25,6 +26,8 @@ object SystemProcesses {
     case (Seq(ListChannelWithRandom(Seq(arg), _, _))) =>
       Task.now(Console.println(prettyPrinter.buildString(arg)))
   }
+
+  private val systemProcsMatch = matchListQuote(CostAccount(Integer.MAX_VALUE))
 
   private implicit class ProduceOps(res: Id[
     Either[OutOfPhlogistonsError.type, Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]]) {
@@ -43,7 +46,7 @@ object SystemProcesses {
         space
           .produce(ack,
                    ListChannelWithRandom(Seq(Channel(Quote(Par.defaultInstance))), rand, cost),
-                   false)
+                   false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
   }
@@ -61,7 +64,7 @@ object SystemProcesses {
         space
           .produce(ack,
                    ListChannelWithRandom(Seq(Channel(Quote(Par.defaultInstance))), rand, cost),
-                   false)
+                   false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
   }
@@ -91,7 +94,7 @@ object SystemProcesses {
         space
           .produce(ack,
                    ListChannelWithRandom(Seq(Channel(Quote(Expr(GBool(verified))))), rand, cost),
-                   false)
+                   false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
   }
@@ -107,7 +110,7 @@ object SystemProcesses {
         space
           .produce(ack,
                    ListChannelWithRandom(Seq(Channel(Quote(Expr(GBool(verified))))), rand, cost),
-                   false)
+                   false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
     case _ =>
@@ -126,7 +129,7 @@ object SystemProcesses {
             ListChannelWithRandom(Seq(Channel(Quote(Expr(GByteArray(ByteString.copyFrom(hash)))))),
                                   rand,
                                   cost),
-            false)
+            false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
     case _ =>
@@ -144,7 +147,7 @@ object SystemProcesses {
             ListChannelWithRandom(Seq(Channel(Quote(Expr(GByteArray(ByteString.copyFrom(hash)))))),
                                   rand,
                                   cost),
-            false)
+            false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
     case _ =>
@@ -162,7 +165,7 @@ object SystemProcesses {
             ListChannelWithRandom(Seq(Channel(Quote(Expr(GByteArray(ByteString.copyFrom(hash)))))),
                                   rand,
                                   cost),
-            false)
+            false)(systemProcsMatch)
           .foldResult(dispatcher)
       }
     case _ =>

@@ -26,23 +26,17 @@ object implicits {
       }
     }
 
-  implicit val matchListQuote: StorageMatch[BindPattern,
-                                            OutOfPhlogistonsError.type,
-                                            ListChannelWithRandom,
-                                            ListChannelWithRandom] =
+  def matchListQuote(phlosAvailable: CostAccount): StorageMatch[BindPattern,
+                                                                OutOfPhlogistonsError.type,
+                                                                ListChannelWithRandom,
+                                                                ListChannelWithRandom] =
     new StorageMatch[BindPattern,
                      OutOfPhlogistonsError.type,
                      ListChannelWithRandom,
                      ListChannelWithRandom] {
 
       def get(pattern: BindPattern, data: ListChannelWithRandom)
-        : Either[OutOfPhlogistonsError.type, Option[ListChannelWithRandom]] = {
-        val phlosAvailableO = pattern.cost
-          .orElse(data.cost)
-          .map(CostAccount.fromProto(_))
-
-        val phlosAvailable = phlosAvailableO.get
-
+        : Either[OutOfPhlogistonsError.type, Option[ListChannelWithRandom]] =
         SpatialMatcher
           .foldMatch(data.channels, pattern.patterns, pattern.remainder)
           .runWithCost(phlosAvailable)
@@ -65,28 +59,18 @@ object implicits {
                                           Some(CostAccount.toProto(cost)))
                 }
           }
-      }
     }
 
   /* Serialize instances */
 
-  implicit val serializeBindPattern: Serialize[BindPattern] = new Serialize[BindPattern] {
-    override def encode(a: BindPattern): ByteVector =
-      ByteVector.view(a.copy(cost = None).toByteArray)
-    override def decode(bytes: ByteVector): Either[Throwable, BindPattern] =
-      Either.catchNonFatal(BindPattern.parseFrom(bytes.toArray))
-  }
-
-  implicit val serializeChannels: Serialize[ListChannelWithRandom] =
-    new Serialize[ListChannelWithRandom] {
-      override def encode(a: ListChannelWithRandom): ByteVector =
-        ByteVector.view(a.copy(cost = None).toByteArray)
-      override def decode(bytes: ByteVector): Either[Throwable, ListChannelWithRandom] =
-        Either.catchNonFatal(ListChannelWithRandom.parseFrom(bytes.toArray))
-    }
+  implicit val serializeBindPattern: Serialize[BindPattern] =
+    mkProtobufInstance(BindPattern)
 
   implicit val serializeChannel: Serialize[Channel] =
     mkProtobufInstance(Channel)
+
+  implicit val serializeChannels: Serialize[ListChannelWithRandom] =
+    mkProtobufInstance(ListChannelWithRandom)
 
   implicit val serializeTaggedContinuation: Serialize[TaggedContinuation] =
     mkProtobufInstance(TaggedContinuation)

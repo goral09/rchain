@@ -56,14 +56,13 @@ object RholangOnlyDispatcher {
       s: Sync[M],
       ft: FunctorTell[M, Throwable])
     : (Dispatch[M, ListChannelWithRandom, TaggedContinuation], ChargingReducer[M]) = {
-    implicit lazy val pureSpace = PureRSpace[M].of(tuplespace)
-    lazy val tuplespaceAlg      = TuplespaceAlg.rspaceTuplespace(chargingRSpace, dispatcher)
+    lazy val tuplespaceAlg = TuplespaceAlg.rspaceTuplespace(chargingRSpace, dispatcher)
     lazy val dispatcher: Dispatch[M, ListChannelWithRandom, TaggedContinuation] =
       new RholangOnlyDispatcher(chargingReducer)
     implicit lazy val costAlg = CostAccountingAlg.unsafe[M](CostAccount(0))
     implicit lazy val reducer: Reduce[M] =
       new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg, urnMap)
-    lazy val chargingRSpace  = ChargingRSpace.pureRSpace[M]
+    lazy val chargingRSpace  = ChargingRSpace.pureRSpace[M](s, costAlg, tuplespace)
     lazy val chargingReducer = new ChargingReducer[M]()
     (dispatcher, chargingReducer)
   }
@@ -104,15 +103,14 @@ object RholangAndScalaDispatcher {
                                 s: Sync[M],
                                 ft: FunctorTell[M, Throwable])
     : (Dispatch[M, ListChannelWithRandom, TaggedContinuation], ChargingReducer[M], Registry[M]) = {
-    implicit lazy val pureSpace = PureRSpace[M].of(tuplespace)
-    lazy val tuplespaceAlg      = TuplespaceAlg.rspaceTuplespace(chargingRSpace, dispatcher)
+    lazy val tuplespaceAlg = TuplespaceAlg.rspaceTuplespace(chargingRSpace, dispatcher)
     lazy val dispatcher: Dispatch[M, ListChannelWithRandom, TaggedContinuation] =
       new RholangAndScalaDispatcher(chargingReducer, dispatchTable)
     implicit lazy val reducer: Reduce[M] =
       new Reduce.DebruijnInterpreter[M, F](tuplespaceAlg, urnMap)
     implicit lazy val costAlg      = CostAccountingAlg.unsafe[M](CostAccount(0))
     lazy val chargingReducer       = new ChargingReducer[M]
-    lazy val chargingRSpace        = ChargingRSpace.pureRSpace[M]
+    lazy val chargingRSpace        = ChargingRSpace.pureRSpace[M](s, costAlg, tuplespace)
     lazy val registry: Registry[M] = new RegistryImpl(chargingRSpace, dispatcher)
     (dispatcher, chargingReducer, registry)
   }

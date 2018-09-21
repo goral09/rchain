@@ -2,16 +2,17 @@ package coop.rchain.rholang.interpreter.accounting
 
 import cats.Monoid
 import coop.rchain.models.PCost
+import scala.math.max
 
 case class CostAccount(idx: Int, cost: Cost) {
   def +(other: Cost): CostAccount =
     copy(idx + 1, cost + other)
   def +(other: CostAccount): CostAccount =
-    copy(idx + other.idx, cost + other.cost)
+    copy(max(idx, other.idx), cost + other.cost)
   def -(other: Cost): CostAccount =
     copy(idx + 1, cost - other)
   def -(other: CostAccount): CostAccount =
-    copy(idx + other.idx, cost - other.cost)
+    copy(max(idx, other.idx), cost - other.cost)
 }
 
 object CostAccount {

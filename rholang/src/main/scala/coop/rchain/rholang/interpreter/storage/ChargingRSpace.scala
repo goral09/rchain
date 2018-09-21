@@ -4,13 +4,14 @@ import cats.effect.Sync
 import cats.implicits._
 import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
 import coop.rchain.models._
-import coop.rchain.rholang.interpreter.Runtime.RhoPureSpace
+import coop.rchain.rholang.interpreter.Runtime.RhoISpace
 import coop.rchain.rholang.interpreter.accounting.CostAccount._
 import coop.rchain.rholang.interpreter.accounting.{CostAccount, CostAccountingAlg, _}
 import coop.rchain.rholang.interpreter.errors
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
+import coop.rchain.rholang.interpreter.storage.implicits.matchListQuote
 import coop.rchain.rspace.pure.PureRSpace
-import coop.rchain.rspace.{Blake2b256Hash, Checkpoint, Match}
+import coop.rchain.rspace.{Blake2b256Hash, Checkpoint}
 
 import scala.collection.immutable.Seq
 
@@ -27,7 +28,7 @@ object ChargingRSpace {
   def storageCostProduce(channel: Channel, data: ListChannelWithRandom): Cost =
     channel.storageCost + data.channels.storageCost
 
-  def pureRSpace[F[_]: Sync](implicit costAlg: CostAccountingAlg[F], space: RhoPureSpace[F]) =
+  def pureRSpace[F[_]: Sync](implicit costAlg: CostAccountingAlg[F], space: RhoISpace) =
     new PureRSpace[F,
                    Channel,
                    BindPattern,
@@ -36,51 +37,43 @@ object ChargingRSpace {
                    ListChannelWithRandom,
                    TaggedContinuation] {
 
-      override def consume(channels: Seq[Channel],
-                           patterns: Seq[BindPattern],
-                           continuation: TaggedContinuation,
-                           persist: Boolean)(implicit m: Match[BindPattern,
-                                                               errors.OutOfPhlogistonsError.type,
-                                                               ListChannelWithRandom,
-                                                               ListChannelWithRandom])
-        : F[Either[errors.OutOfPhlogistonsError.type,
-                   Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
+      override def consume(
+          channels: Seq[Channel],
+          patterns: Seq[BindPattern],
+          continuation: TaggedContinuation,
+          persist: Boolean): F[Either[errors.OutOfPhlogistonsError.type,
+                                      Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
         val storageCost = storageCostConsume(channels, patterns, continuation)
         for {
-          _ <- costAlg.charge(storageCost)
-          patternsWithPhlos <- costAlg
-                                .get()
-                                .map(phlos => patterns.map(_.withCost(CostAccount.toProto(phlos)))) //FIXME(mateusz.gorski)
-          consRes <- space.consume(channels, patternsWithPhlos, continuation, persist)
-          _       <- handleResult(consRes, storageCost, persist)
+          _              <- costAlg.charge(storageCost)
+          phlosAvailable <- costAlg.get()
+          matchF         = implicits.matchListQuote(phlosAvailable)
+          consRes        <- Sync[F].delay(space.consume(channels, patterns, continuation, persist)(matchF))
+          _              <- handleResult(consRes, storageCost, persist)
         } yield consRes
       }
 
       override def install(channels: Seq[Channel],
                            patterns: Seq[BindPattern],
-                           continuation: TaggedContinuation)(
-          implicit m: Match[BindPattern,
-                            errors.OutOfPhlogistonsError.type,
-                            ListChannelWithRandom,
-                            ListChannelWithRandom])
-        : F[Option[(TaggedContinuation, Seq[ListChannelWithRandom])]] =
-        space.install(channels, patterns, continuation) // install is free
+                           continuation: TaggedContinuation)
+        : F[Option[(TaggedContinuation, Seq[ListChannelWithRandom])]] = {
+        // install is free
+        implicit val matchF = matchListQuote(CostAccount(Integer.MAX_VALUE))
+        Sync[F].delay(space.install(channels, patterns, continuation))
+      }
 
-      override def produce(channel: Channel, data: ListChannelWithRandom, persist: Boolean)(
-          implicit m: Match[BindPattern,
-                            errors.OutOfPhlogistonsError.type,
-                            ListChannelWithRandom,
-                            ListChannelWithRandom])
-        : F[Either[errors.OutOfPhlogistonsError.type,
-                   Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
+      override def produce(
+          channel: Channel,
+          data: ListChannelWithRandom,
+          persist: Boolean): F[Either[errors.OutOfPhlogistonsError.type,
+                                      Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
         val storageCost = storageCostProduce(channel, data)
         for {
-          _ <- costAlg.charge(storageCost)
-          dataWithPhlos <- costAlg
-                            .get()
-                            .map(phlos => data.withCost(CostAccount.toProto(phlos))) //FIXME(mateusz.gorski)
-          prodRes <- space.produce(channel, dataWithPhlos, persist)
-          _       <- handleResult(prodRes, storageCost, persist)
+          _              <- costAlg.charge(storageCost)
+          phlosAvailable <- costAlg.get()
+          matchF         = implicits.matchListQuote(phlosAvailable)
+          prodRes        <- Sync[F].delay(space.produce(channel, data, persist)(matchF))
+          _              <- handleResult(prodRes, storageCost, persist)
         } yield prodRes
       }
 
@@ -114,8 +107,8 @@ object ChargingRSpace {
         }
 
       override def createCheckpoint(): F[Checkpoint] =
-        space.createCheckpoint()
-      override def reset(hash: Blake2b256Hash): F[Unit] = space.reset(hash)
-      override def close(): F[Unit]                     = space.close()
+        Sync[F].delay(space.createCheckpoint())
+      override def reset(hash: Blake2b256Hash): F[Unit] = Sync[F].delay(space.reset(hash))
+      override def close(): F[Unit]                     = Sync[F].delay(space.close())
     }
 }

@@ -96,8 +96,6 @@ message BindPattern {
     repeated Channel patterns = 1;
     Var remainder = 2;
     int32 freeCount = 3;
-    // phlos available
-    PCost cost = 4;
 }
 
 message ListBindPatterns {
