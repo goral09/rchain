@@ -8,7 +8,7 @@ case class CostAccount(idx: Int, cost: Cost) {
   def +(other: Cost): CostAccount =
     copy(idx + 1, cost + other)
   def +(other: CostAccount): CostAccount =
-    copy(max(idx, other.idx), cost + other.cost)
+    copy(idx + other.idx, cost + other.cost)
   def -(other: Cost): CostAccount =
     copy(idx + 1, cost - other)
   def -(other: CostAccount): CostAccount =

@@ -6,7 +6,7 @@ import coop.rchain.models.Var.VarInstance.FreeVar
 import coop.rchain.models._
 import coop.rchain.models.rholang.implicits._
 import coop.rchain.models.serialization.implicits.mkProtobufInstance
-import coop.rchain.rholang.interpreter.accounting.CostAccount
+import coop.rchain.rholang.interpreter.accounting.{Cost, CostAccount}
 import coop.rchain.rholang.interpreter.errors.OutOfPhlogistonsError
 import coop.rchain.rholang.interpreter.matcher.OptionalFreeMapWithCost._
 import coop.rchain.rholang.interpreter.matcher._
@@ -48,7 +48,10 @@ object implicits {
           .runWithCost(phlosAvailable)
           .map {
             case (phlosLeft, resultMatch) =>
-              val cost = phlosLeft.copy(cost = phlosAvailable.cost - phlosLeft.cost)
+              val cost = CostAccount(
+                phlosLeft.idx - phlosAvailable.idx,
+                phlosAvailable.cost - phlosLeft.cost
+              )
               resultMatch
                 .map {
                   case (freeMap: FreeMap, caughtRem: Seq[Channel]) =>
