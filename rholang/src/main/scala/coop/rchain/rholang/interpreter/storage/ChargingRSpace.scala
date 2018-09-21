@@ -16,9 +16,11 @@ import coop.rchain.rspace.{Blake2b256Hash, Checkpoint}
 import scala.collection.immutable.Seq
 
 object ChargingRSpace {
-  def storageCostConsume(channels: Seq[Channel],
-                         patterns: Seq[BindPattern],
-                         continuation: TaggedContinuation): Cost = {
+  def storageCostConsume(
+      channels: Seq[Channel],
+      patterns: Seq[BindPattern],
+      continuation: TaggedContinuation
+  ): Cost = {
     val bodyCost = Some(continuation).collect {
       case TaggedContinuation(ParBody(ParWithRandom(body, _))) => body.storageCost
     }
@@ -29,20 +31,24 @@ object ChargingRSpace {
     channel.storageCost + data.channels.storageCost
 
   def pureRSpace[F[_]: Sync](implicit costAlg: CostAccountingAlg[F], space: RhoISpace) =
-    new PureRSpace[F,
-                   Channel,
-                   BindPattern,
-                   OutOfPhlogistonsError.type,
-                   ListChannelWithRandom,
-                   ListChannelWithRandom,
-                   TaggedContinuation] {
+    new PureRSpace[
+      F,
+      Channel,
+      BindPattern,
+      OutOfPhlogistonsError.type,
+      ListChannelWithRandom,
+      ListChannelWithRandom,
+      TaggedContinuation
+    ] {
 
       override def consume(
           channels: Seq[Channel],
           patterns: Seq[BindPattern],
           continuation: TaggedContinuation,
-          persist: Boolean): F[Either[errors.OutOfPhlogistonsError.type,
-                                      Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
+          persist: Boolean
+      ): F[Either[errors.OutOfPhlogistonsError.type, Option[
+        (TaggedContinuation, Seq[ListChannelWithRandom])
+      ]]] = {
         val storageCost = storageCostConsume(channels, patterns, continuation)
         for {
           _              <- costAlg.charge(storageCost)
@@ -53,10 +59,11 @@ object ChargingRSpace {
         } yield consRes
       }
 
-      override def install(channels: Seq[Channel],
-                           patterns: Seq[BindPattern],
-                           continuation: TaggedContinuation)
-        : F[Option[(TaggedContinuation, Seq[ListChannelWithRandom])]] = {
+      override def install(
+          channels: Seq[Channel],
+          patterns: Seq[BindPattern],
+          continuation: TaggedContinuation
+      ): F[Option[(TaggedContinuation, Seq[ListChannelWithRandom])]] = {
         // install is free
         implicit val matchF = matchListQuote(CostAccount(Integer.MAX_VALUE))
         Sync[F].delay(space.install(channels, patterns, continuation))
@@ -65,8 +72,10 @@ object ChargingRSpace {
       override def produce(
           channel: Channel,
           data: ListChannelWithRandom,
-          persist: Boolean): F[Either[errors.OutOfPhlogistonsError.type,
-                                      Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]] = {
+          persist: Boolean
+      ): F[Either[errors.OutOfPhlogistonsError.type, Option[
+        (TaggedContinuation, Seq[ListChannelWithRandom])
+      ]]] = {
         val storageCost = storageCostProduce(channel, data)
         for {
           _              <- costAlg.charge(storageCost)
@@ -78,10 +87,12 @@ object ChargingRSpace {
       }
 
       private def handleResult(
-          result: Either[OutOfPhlogistonsError.type,
-                         Option[(TaggedContinuation, Seq[ListChannelWithRandom])]],
+          result: Either[OutOfPhlogistonsError.type, Option[
+            (TaggedContinuation, Seq[ListChannelWithRandom])
+          ]],
           storageCost: Cost,
-          persist: Boolean): F[Unit] =
+          persist: Boolean
+      ): F[Unit] =
         result match {
           case Left(oope) =>
             // if we run out of phlos during the match we have to zero phlos available

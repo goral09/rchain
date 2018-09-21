@@ -12,10 +12,12 @@ import scala.collection.immutable.{Seq => ImmSeq}
 import scala.collection.mutable
 import scala.collection.mutable.Map
 
-final case class Consume(channels: ImmSeq[Channel],
-                         patterns: ImmSeq[BindPattern],
-                         continuation: TaggedContinuation,
-                         persist: Boolean)
+final case class Consume(
+    channels: ImmSeq[Channel],
+    patterns: ImmSeq[BindPattern],
+    continuation: TaggedContinuation,
+    persist: Boolean
+)
 final case class Produce(channel: Channel, data: ListChannelWithRandom, persist: Boolean)
 
 object TestISpace {
@@ -23,19 +25,26 @@ object TestISpace {
   def apply(): TestISpace       = new TestISpace(mutable.HashMap.empty, mutable.HashMap.empty)
 }
 
-class TestISpace(val consumesMap: Map[Channel, List[Consume]],
-                 val producesMap: Map[Channel, List[Produce]])
-    extends RhoISpace {
+class TestISpace(
+    val consumesMap: Map[Channel, List[Consume]],
+    val producesMap: Map[Channel, List[Produce]]
+) extends RhoISpace {
 
-  override def consume(channels: ImmSeq[Channel],
-                       patterns: ImmSeq[BindPattern],
-                       continuation: TaggedContinuation,
-                       persist: Boolean)(implicit m: rspace.Match[BindPattern,
-                                                                  errors.OutOfPhlogistonsError.type,
-                                                                  ListChannelWithRandom,
-                                                                  ListChannelWithRandom])
-    : Id[Either[errors.OutOfPhlogistonsError.type,
-                Option[(TaggedContinuation, ImmSeq[ListChannelWithRandom])]]] = {
+  override def consume(
+      channels: ImmSeq[Channel],
+      patterns: ImmSeq[BindPattern],
+      continuation: TaggedContinuation,
+      persist: Boolean
+  )(
+      implicit m: rspace.Match[
+        BindPattern,
+        errors.OutOfPhlogistonsError.type,
+        ListChannelWithRandom,
+        ListChannelWithRandom
+      ]
+  ): Id[Either[errors.OutOfPhlogistonsError.type, Option[
+    (TaggedContinuation, ImmSeq[ListChannelWithRandom])
+  ]]] = {
     val cs = Consume(channels, patterns, continuation, persist)
     def updateConsumesMap: Unit = {
       val soFar = consumesMap.getOrElse(channels.head, List.empty[Consume])
@@ -55,22 +64,29 @@ class TestISpace(val consumesMap: Map[Channel, List[Consume]],
         Right(Some((continuation, List(channelsData))))
     }
   }
-  override def install(channels: ImmSeq[Channel],
-                       patterns: ImmSeq[BindPattern],
-                       continuation: TaggedContinuation)(
-      implicit m: rspace.Match[BindPattern,
-                               errors.OutOfPhlogistonsError.type,
-                               ListChannelWithRandom,
-                               ListChannelWithRandom])
-    : Id[Option[(TaggedContinuation, ImmSeq[ListChannelWithRandom])]] = ???
+  override def install(
+      channels: ImmSeq[Channel],
+      patterns: ImmSeq[BindPattern],
+      continuation: TaggedContinuation
+  )(
+      implicit m: rspace.Match[
+        BindPattern,
+        errors.OutOfPhlogistonsError.type,
+        ListChannelWithRandom,
+        ListChannelWithRandom
+      ]
+  ): Id[Option[(TaggedContinuation, ImmSeq[ListChannelWithRandom])]] = ???
 
   override def produce(channel: Channel, data: ListChannelWithRandom, persist: Boolean)(
-      implicit m: rspace.Match[BindPattern,
-                               errors.OutOfPhlogistonsError.type,
-                               ListChannelWithRandom,
-                               ListChannelWithRandom])
-    : Id[Either[errors.OutOfPhlogistonsError.type,
-                Option[(TaggedContinuation, ImmSeq[ListChannelWithRandom])]]] = {
+      implicit m: rspace.Match[
+        BindPattern,
+        errors.OutOfPhlogistonsError.type,
+        ListChannelWithRandom,
+        ListChannelWithRandom
+      ]
+  ): Id[Either[errors.OutOfPhlogistonsError.type, Option[
+    (TaggedContinuation, ImmSeq[ListChannelWithRandom])
+  ]]] = {
     val produce = Produce(channel, data, persist)
     def updateProducesMap: Unit = {
       val soFar = producesMap.getOrElse(channel, List.empty[Produce])
@@ -91,12 +107,15 @@ class TestISpace(val consumesMap: Map[Channel, List[Consume]],
     }
   }
 
-  override def retrieve(root: Blake2b256Hash, channelsHash: Blake2b256Hash)
-    : Id[Option[internal.GNAT[Channel, BindPattern, ListChannelWithRandom, TaggedContinuation]]] =
+  override def retrieve(
+      root: Blake2b256Hash,
+      channelsHash: Blake2b256Hash
+  ): Id[Option[internal.GNAT[Channel, BindPattern, ListChannelWithRandom, TaggedContinuation]]] =
     ???
   override def getData(channel: Channel): ImmSeq[internal.Datum[ListChannelWithRandom]] = ???
-  override def getWaitingContinuations(channels: ImmSeq[Channel])
-    : ImmSeq[internal.WaitingContinuation[BindPattern, TaggedContinuation]] = ???
+  override def getWaitingContinuations(
+      channels: ImmSeq[Channel]
+  ): ImmSeq[internal.WaitingContinuation[BindPattern, TaggedContinuation]] = ???
 
   override def clear(): Id[Unit] = ???
 

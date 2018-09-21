@@ -42,7 +42,8 @@ class ChargingRSpaceTest extends fixture.FlatSpec with TripleEqualsSupport with 
     val test = for {
       _ <- chargingRSpace.consume(channels, patterns, continuation, false)
       _ = pureRSpace.consumesMap.get(channels.head) shouldBe Some(
-        List(Consume(channels, patterns, continuation, false)))
+        List(Consume(channels, patterns, continuation, false))
+      )
       phlosLeft <- costAlg.get()
       // we expect Cost = 1 because there will be no match
       // so we will pay only for the storage
@@ -69,7 +70,8 @@ class ChargingRSpaceTest extends fixture.FlatSpec with TripleEqualsSupport with 
     val test = for {
       _ <- chargingRSpace.produce(channels.head, data, false)
       _ = pureRSpace.producesMap.get(channels.head) shouldBe Some(
-        List(Produce(channels.head, data, false)))
+        List(Produce(channels.head, data, false))
+      )
       phlosAfterProduce <- costAlg.get()
       _                 = phlosAfterProduce.cost shouldBe (minimumPhlos - produceStorageCost)
       _                 <- chargingRSpace.consume(channels, patterns, continuation, false)
@@ -113,9 +115,11 @@ class ChargingRSpaceTest extends fixture.FlatSpec with TripleEqualsSupport with 
     val chargingRSpace      = ChargingRSpace.pureRSpace(s, costAlg, pureRSpace)
     test(TestFixture(chargingRSpace, costAlg, pureRSpace))
   }
-  final case class TestFixture(chargingRSpace: ChargingRSpace,
-                               costAlg: CostAccountingAlg[Task],
-                               pureRSpace: TestISpace)
+  final case class TestFixture(
+      chargingRSpace: ChargingRSpace,
+      costAlg: CostAccountingAlg[Task],
+      pureRSpace: TestISpace
+  )
 
   override type FixtureParam = TestFixture
 }

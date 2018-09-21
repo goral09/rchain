@@ -26,17 +26,23 @@ object implicits {
       }
     }
 
-  def matchListQuote(phlosAvailable: CostAccount): StorageMatch[BindPattern,
-                                                                OutOfPhlogistonsError.type,
-                                                                ListChannelWithRandom,
-                                                                ListChannelWithRandom] =
-    new StorageMatch[BindPattern,
-                     OutOfPhlogistonsError.type,
-                     ListChannelWithRandom,
-                     ListChannelWithRandom] {
+  def matchListQuote(phlosAvailable: CostAccount): StorageMatch[
+    BindPattern,
+    OutOfPhlogistonsError.type,
+    ListChannelWithRandom,
+    ListChannelWithRandom
+  ] =
+    new StorageMatch[
+      BindPattern,
+      OutOfPhlogistonsError.type,
+      ListChannelWithRandom,
+      ListChannelWithRandom
+    ] {
 
-      def get(pattern: BindPattern, data: ListChannelWithRandom)
-        : Either[OutOfPhlogistonsError.type, Option[ListChannelWithRandom]] =
+      def get(
+          pattern: BindPattern,
+          data: ListChannelWithRandom
+      ): Either[OutOfPhlogistonsError.type, Option[ListChannelWithRandom]] =
         SpatialMatcher
           .foldMatch(data.channels, pattern.patterns, pattern.remainder)
           .runWithCost(phlosAvailable)
@@ -54,9 +60,11 @@ object implicits {
                         freeMap + (level -> VectorPar().addExprs(EList(flatRem.toVector)))
                       case _ => freeMap
                     }
-                    ListChannelWithRandom(toChannels(remainderMap, pattern.freeCount),
-                                          data.randomState,
-                                          Some(CostAccount.toProto(cost)))
+                    ListChannelWithRandom(
+                      toChannels(remainderMap, pattern.freeCount),
+                      data.randomState,
+                      Some(CostAccount.toProto(cost))
+                    )
                 }
           }
     }

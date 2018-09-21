@@ -18,30 +18,37 @@ trait TuplespaceAlg[F[_]] {
 
 object TuplespaceAlg {
   def rspaceTuplespace[F[_], M[_]](
-      pureRSpace: PureRSpace[F,
-                             Channel,
-                             BindPattern,
-                             OutOfPhlogistonsError.type,
-                             ListChannelWithRandom,
-                             ListChannelWithRandom,
-                             TaggedContinuation],
-      dispatcher: => Dispatch[F, ListChannelWithRandom, TaggedContinuation])(
-      implicit F: Sync[F],
-      P: Parallel[F, M]): TuplespaceAlg[F] = new TuplespaceAlg[F] {
-    override def produce(channel: Channel,
-                         data: ListChannelWithRandom,
-                         persistent: Boolean): F[Unit] = {
+      pureRSpace: PureRSpace[
+        F,
+        Channel,
+        BindPattern,
+        OutOfPhlogistonsError.type,
+        ListChannelWithRandom,
+        ListChannelWithRandom,
+        TaggedContinuation
+      ],
+      dispatcher: => Dispatch[F, ListChannelWithRandom, TaggedContinuation]
+  )(implicit F: Sync[F], P: Parallel[F, M]): TuplespaceAlg[F] = new TuplespaceAlg[F] {
+    override def produce(
+        channel: Channel,
+        data: ListChannelWithRandom,
+        persistent: Boolean
+    ): F[Unit] = {
       def go(
-          res: Either[OutOfPhlogistonsError.type,
-                      Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]): F[Unit] =
+          res: Either[OutOfPhlogistonsError.type, Option[
+            (TaggedContinuation, Seq[ListChannelWithRandom])
+          ]]
+      ): F[Unit] =
         res match {
           case Left(oope) =>
             F.raiseError(oope)
           case Right(Some((continuation, dataList))) =>
             if (persistent) {
               Parallel
-                .parProduct(dispatcher.dispatch(continuation, dataList),
-                            produce(channel, data, persistent))
+                .parProduct(
+                  dispatcher.dispatch(continuation, dataList),
+                  produce(channel, data, persistent)
+                )
                 .map(_ => ())
             } else {
               dispatcher.dispatch(continuation, dataList)
@@ -56,23 +63,29 @@ object TuplespaceAlg {
       } yield ()
     }
 
-    override def consume(binds: Seq[(BindPattern, Quote)],
-                         body: ParWithRandom,
-                         persistent: Boolean): F[Unit] =
+    override def consume(
+        binds: Seq[(BindPattern, Quote)],
+        body: ParWithRandom,
+        persistent: Boolean
+    ): F[Unit] =
       binds match {
         case Nil => F.raiseError(ReduceError("Error: empty binds"))
         case _ =>
           def go(
-              res: Either[OutOfPhlogistonsError.type,
-                          Option[(TaggedContinuation, Seq[ListChannelWithRandom])]]): F[Unit] =
+              res: Either[OutOfPhlogistonsError.type, Option[
+                (TaggedContinuation, Seq[ListChannelWithRandom])
+              ]]
+          ): F[Unit] =
             res match {
               case Left(oope) =>
                 F.raiseError(oope)
               case Right(Some((continuation, dataList))) =>
                 if (persistent) {
                   Parallel
-                    .parProduct(dispatcher.dispatch(continuation, dataList),
-                                consume(binds, body, persistent))
+                    .parProduct(
+                      dispatcher.dispatch(continuation, dataList),
+                      consume(binds, body, persistent)
+                    )
                     .map(_ => ())
                 } else {
                   dispatcher.dispatch(continuation, dataList)
@@ -82,10 +95,12 @@ object TuplespaceAlg {
 
           val (patterns: Seq[BindPattern], sources: Seq[Quote]) = binds.unzip
           for {
-            res <- pureRSpace.consume(sources.map(q => Channel(q)).toList,
-                                      patterns.toList,
-                                      TaggedContinuation(ParBody(body)),
-                                      persist = persistent)
+            res <- pureRSpace.consume(
+                    sources.map(q => Channel(q)).toList,
+                    patterns.toList,
+                    TaggedContinuation(ParBody(body)),
+                    persist = persistent
+                  )
             _ <- go(res)
           } yield ()
       }
