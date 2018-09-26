@@ -9,6 +9,8 @@ import coop.rchain.rholang.interpreter.Runtime.RhoIStore
 import coop.rchain.rspace.internal.{Datum, Row, WaitingContinuation}
 import coop.rchain.rspace.trace.{Consume, Produce}
 
+import scala.util.Try
+
 object StoragePrinter {
   def prettyPrint(store: RhoIStore): String = {
     val pars: Seq[Par] = store.toMap.map {
@@ -77,7 +79,14 @@ object StoragePrinter {
       val par = pars.reduce { (p1: Par, p2: Par) =>
         p1 ++ p2
       }
-      PrettyPrinter().buildString(par)
+      val capOutput = Try(System.getenv("CAP_STORAGE_CONTENT")).toOption.collect {
+        case "1" | "on" | "yes" | "true" => true
+        case _ => false
+      }.getOrElse(false)
+      if(capOutput)
+        PrettyPrinter().buildString(par).take(200)
+      else
+        PrettyPrinter().buildString(par)
     }
   }
 }

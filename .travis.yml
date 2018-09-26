@@ -8,7 +8,9 @@ matrix:
   - language: nix
     env: SUBPROJECT=rosette
   - language: scala
-    env: SUBPROJECT=core
+    env:
+      - SUBPROJECT=core
+      - CAP_STORAGE_CONTENT=true
     scala: 2.12.4
     sbt_args: -no-colors
     install:
