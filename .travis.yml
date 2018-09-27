@@ -10,7 +10,6 @@ matrix:
   - language: scala
     env:
       - SUBPROJECT=core
-      - CAP_STORAGE_CONTENT=true
     scala: 2.12.4
     sbt_args: -no-colors
     install:
