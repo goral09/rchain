@@ -5,6 +5,7 @@ import java.io.StringReader
 import com.google.protobuf.ByteString
 import coop.rchain.crypto.codec.Base16
 import coop.rchain.crypto.hash.{Blake2b256, Blake2b512Random}
+import coop.rchain.crypto.signatures.Ed25519
 import coop.rchain.models.Expr.ExprInstance._
 import coop.rchain.models._
 import coop.rchain.models.rholang.implicits._
@@ -28,7 +29,7 @@ trait RegistryTester extends PersistentStoreTester {
   implicit val costAccounting =
     CostAccountingAlg.unsafe[Task](CostAccount(Integer.MAX_VALUE))
 
-  def dispatchTableCreator(registry: Registry[Task]): RhoDispatchMap =
+  private def dispatchTableCreator(registry: Registry[Task]): RhoDispatchMap =
     Map(
       lookupRef                 -> registry.lookup,
       lookupCallbackRef         -> registry.lookupCallback,
@@ -171,20 +172,22 @@ class RegistrySpec extends FlatSpec with Matchers with RegistryTester {
       expected: Par,
       rand: Blake2b512Random
   ): Unit =
-    result.get(List[Par](GString(s))) should be(
-      Some(
-        Row(
-          List(
-            Datum.create[Par, ListParWithRandom](
-              GString(s),
-              ListParWithRandom(Seq(expected), rand),
-              false
-            )
-          ),
-          List()
+    withClue(s"""Assert data on channel @"$s"""") {
+      result.get(List[Par](GString(s))) should be(
+        Some(
+          Row(
+            List(
+              Datum.create[Par, ListParWithRandom](
+                GString(s),
+                ListParWithRandom(Seq(expected), rand),
+                false
+              )
+            ),
+            List()
+          )
         )
       )
-    )
+    }
 
   "lookup" should "recurse" in {
     val lookupString: String =
@@ -546,50 +549,60 @@ class RegistrySpec extends FlatSpec with Matchers with RegistryTester {
   }
 
   "Signed Insert" should "work like plain insert if the signatures match" in {
-    // Secret key:
-    // d039d5c634ad95d968fc18368d81b97aaecd32fc7cf6eec07a97c5ac9f9fcb5b11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d
-    // Publick key:
-    // 11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d
+    val (secKey, pubKey) = Ed25519.newKeyPair
+    val base16PubKey     = Base16.encode(pubKey)
+
+    final case class Entry(raw: String, nonce: Int, signature: String)
+    def newEntry(raw: String, nonceRaw: Int): Entry = {
+      val data: Par  = GString(raw)
+      val nonce: Par = GInt(nonceRaw)
+      val tuple: Par = ETuple(Vector(nonce, data))
+      val signature  = Ed25519.sign(tuple.toByteArray, secKey)
+      Entry(raw, nonceRaw, Base16.encode(signature))
+    }
+
+    val Entry(fstData, fstNonce, fstSignature) = newEntry("entry", 789)
+    val Entry(sndData, sndNonce, sndSign)      = newEntry("entryFail", 788)
+    val Entry(thrdData, thrdNonce, thrdSign)   = newEntry("entryReplace", 790)
+    val Entry(fourthData, fourthNonce, _)      = newEntry("entrySigShort", 791)
+    val signatureShort                         = ""
+    val Entry(fifthData, fifthNonce, _)        = newEntry("entrySigFail", 792)
+    val signInvalid                            = Seq.fill(32)("0").mkString("")
+
+    def singleRegister(nonce: Int, data: String, signature: String): String =
+      s"""
+         rr!("$base16PubKey".hexToBytes(), ($nonce, "$data"), "$signature".hexToBytes(), *ack)
+       """
+
     val registerString =
-      """
+      s"""
       new rr(`rho:registry:insertSigned:ed25519`), rl(`rho:registry:lookup`), ack in {
-        rr!("11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d".hexToBytes(),
-            (789, "entry"),
-            "20c3b7da06565933400cb61301ffa14df82ef09b046c8152e02e8047d6f69ee2c2a2e4114db7ceb01eb828dfc98c15e40a502f9d85c58ca03734cab549e85e0d".hexToBytes(),
-            *ack) |
-        for(@{uri /\ Uri} <- ack) { // merge0
+        ${singleRegister(fstNonce, fstData, fstSignature)} |
+        for(@{uri /\\ Uri} <- ack) { // merge0
           rl!(uri, *ack) |
           for(@result <- ack) { // merge1
             @"result0"!(result) |
-            rr!("11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d".hexToBytes(),
-              (788, "entryFail"),
-              "dfe3caf2888f16734da0ffe555a6f67240147d6663d6a036b607398383eea0b362678e98e42a0de6b559780c34ab6e3b4dff0f3a57061ce8936659762ca98700".hexToBytes(),
-              *ack) |
+            ${singleRegister(sndNonce, sndData, sndSign)} |
             for(@Nil <- ack) { // merge2
               rl!(uri, *ack) |
               for(@result <- ack) { // merge3
                 @"result1"!(result) |
-                rr!("11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d".hexToBytes(),
-                  (790, "entryReplace"),
-                  "3eb0a5de797833970e7ce23def0c0e1f7c0a21c25f178f143800119d95f033624ecc3924d73e052d62e5f74e97e5528382428ffa0796ead322636916b46cb60a".hexToBytes(),
-                  *ack) |
-                for(@{uri2 /\ Uri} <- ack) { // merge4
+                ${singleRegister(thrdNonce, thrdData, thrdSign)} |
+                for(@{uri2 /\\ Uri} <- ack) { // merge4
                   @"result2"!(uri == uri2) |
                   rl!(uri2, *ack) |
                   for(@result <- ack) { // merge5
                     @"result3"!(result) |
-                    rr!("11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d".hexToBytes(),
-                      (791, "entrySigShort"),
-                      "".hexToBytes(),
-                      *ack) |
+                    ${singleRegister(fourthNonce, fourthData, signatureShort)} |
                     for(@Nil <- ack) { // merge6
                       rl!(uri, *ack) |
                       for(@result <- ack) { // merge7
                         @"result4"!(result) |
-                        rr!("11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d".hexToBytes(),
-                          (792, "entrySigFail"),
-                          "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000".hexToBytes(),
-                          *ack) |
+                        ${singleRegister(
+                          fifthNonce,
+                          fifthData,
+                          signInvalid
+                        )} |
                         for(@Nil <- ack) { // merge8
                           @"result6"!(uri) |
                           rl!(uri, "result5")
@@ -656,10 +669,7 @@ class RegistrySpec extends FlatSpec with Matchers with RegistryTester {
     lookup5Rand.next()
     val result5Rand = lookup5Rand
 
-    val expectedUri = Registry.buildURI(
-      Blake2b256
-        .hash(Base16.decode("11afb9a5fa2b3e194b701987b3531a93dbdf790dac26f8a2502cfa5d529f6b4d"))
-    )
+    val expectedUri = Registry.buildURI(Blake2b256.hash(pubKey))
 
     val result = withRegistryAndTestSpace { (reducer, space) =>
       implicit val env = Env[Par]()
